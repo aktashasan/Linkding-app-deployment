@@ -21,11 +21,16 @@ env:
   DEPLOYMENT: ${{ secrets.DEPLOYMENT }}
 
 jobs:
-  build-and-deploy:
-    runs-on: self-hosted
+  # Job 1: Build and Push Docker Image (Normal GitHub Runner)
+  build-and-push:
+    runs-on: ubuntu-latest
     permissions:
       contents: read
       packages: write
+    
+    outputs:
+      image_tag: ${{ steps.image_tag.outputs.tag }}
+      image_url: ${{ secrets.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ steps.image_tag.outputs.tag }}
 
     steps:
     - name: Checkout code
@@ -51,39 +56,15 @@ jobs:
       uses: docker/setup-qemu-action@v3
 
     - name: Set up Docker Buildx
-      id: buildx
       uses: docker/setup-buildx-action@v3
-      with:
-        driver-opts: network=host
-
-    - name: Verify Docker Buildx
-      run: |
-        docker buildx version
-        docker buildx ls
-        docker buildx inspect --bootstrap
 
     - name: Log in to Docker Hub
       if: github.event_name != 'workflow_dispatch'
-      timeout-minutes: 1
-      run: |
-        set -e
-        export DOCKER_CONFIG=/tmp/.docker
-        export HOME=/tmp/docker-home
-        mkdir -p "$DOCKER_CONFIG" "$HOME"
-        
-        USERNAME="${{ secrets.DOCKER_USERNAME }}"
-        PASSWORD="${{ secrets.DOCKER_PASSWORD }}"
-        
-        # Base64 encode (printf daha güvenilir)
-        AUTH_STRING=$(printf '%s' "${USERNAME}:${PASSWORD}" | base64)
-        
-        # JSON'ı tek satırda oluştur (heredoc yerine - daha hızlı ve güvenilir)
-        echo "{\"auths\":{\"https://index.docker.io/v1/\":{\"auth\":\"${AUTH_STRING}\"},\"docker.io\":{\"auth\":\"${AUTH_STRING}\"}},\"credsStore\":\"\"}" > "$DOCKER_CONFIG/config.json"
-        
-        echo "✅ Docker credentials configured"
-      env:
-        DOCKER_CONFIG: /tmp/.docker
-        HOME: /tmp/docker-home
+      uses: docker/login-action@v3
+      with:
+        username: ${{ secrets.DOCKER_USERNAME }}
+        password: ${{ secrets.DOCKER_PASSWORD }}
+        registry: ${{ secrets.REGISTRY }}
 
     - name: Determine image tag
       id: image_tag
@@ -94,8 +75,6 @@ jobs:
           echo "tag=${{ github.sha }}" >> $GITHUB_OUTPUT
         fi
 
-    # Step 1: Build and push Docker image to Docker Hub
-    # This must happen BEFORE deployment to ensure the image is available
     - name: Build and push Docker image
       uses: docker/build-push-action@v5
       with:
@@ -107,15 +86,15 @@ jobs:
         cache-from: type=registry,ref=${{ secrets.REGISTRY }}/${{ env.IMAGE_NAME }}:buildcache
         cache-to: type=registry,ref=${{ secrets.REGISTRY }}/${{ env.IMAGE_NAME }}:buildcache,mode=max
         # Note: buildcache image is used for Docker layer caching, this is normal and expected
-        # Note: builder parameter is not needed - setup-buildx-action sets default builder
         # Multi-platform build (amd64 + arm64) for compatibility with different cluster architectures
-      env:
-        # macOS keychain credential helper'ı devre dışı bırak (login step'iyle aynı)
-        DOCKER_CONFIG: /tmp/.docker
-        HOME: /tmp/docker-home
 
-    # Step 2: Set up kubectl for Kubernetes deployment
-    # Only proceed if KUBECONFIG secret is available
+  # Job 2: Deploy to Kubernetes (Self-Hosted Runner - Lokal Cluster Erişimi İçin)
+  deploy:
+    runs-on: self-hosted
+    needs: build-and-push
+    if: always() && (needs.build-and-push.result == 'success')
+    
+    steps:
     - name: Set up kubectl
       uses: azure/setup-kubectl@v3
       with:
@@ -138,12 +117,11 @@ jobs:
           echo "kubeconfig_available=false" >> $GITHUB_OUTPUT
         fi
 
-    # Step 3: Deploy to Kubernetes cluster
     - name: Deploy to Kubernetes
       if: steps.kubeconfig_check.outputs.kubeconfig_available == 'true'
       run: |
-        echo "Deploying image: ${{ secrets.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ steps.image_tag.outputs.tag }}"
-        echo "Note: Image was already pushed to Docker Hub in previous step"
+        echo "Deploying image: ${{ needs.build-and-push.outputs.image_url }}"
+        echo "Image tag: ${{ needs.build-and-push.outputs.image_tag }}"
         echo "Namespace: ${{ env.NAMESPACE }}"
         echo "Deployment: ${{ env.DEPLOYMENT }}"
         
@@ -172,7 +150,7 @@ jobs:
         echo ""
         
         # Yeni image'ı göster
-        NEW_IMAGE="${{ secrets.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ steps.image_tag.outputs.tag }}"
+        NEW_IMAGE="${{ needs.build-and-push.outputs.image_url }}"
         echo "New image to deploy: $NEW_IMAGE"
         echo ""
         
@@ -192,7 +170,7 @@ jobs:
         kubectl get pods -n ${{ env.NAMESPACE }} -l app=linkding
         echo ""
         
-        # Rolling update durumunu bekle (timeout'u 10 dakikaya çıkardık)
+        # Rolling update durumunu bekle (timeout: 10 dakika)
         echo "Waiting for rollout to complete (timeout: 10 minutes)..."
         if kubectl rollout status deployment/${{ env.DEPLOYMENT }} -n ${{ env.NAMESPACE }} --timeout=600s; then
           echo "✅ Rollout completed successfully!"
@@ -233,7 +211,7 @@ jobs:
         echo "Pod status:"
         kubectl get pods -n ${{ env.NAMESPACE }} -l app=linkding
         echo ""
-        echo "Deployed image: ${{ secrets.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ steps.image_tag.outputs.tag }}"
+        echo "Deployed image: ${{ needs.build-and-push.outputs.image_url }}"
         echo ""
         echo "Rollout history:"
         kubectl rollout history deployment/${{ env.DEPLOYMENT }} -n ${{ env.NAMESPACE }}
@@ -245,55 +223,17 @@ jobs:
         echo "Image built and pushed successfully!"
         echo "=========================================="
         echo ""
-        echo "Image: ${{ secrets.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ steps.image_tag.outputs.tag }}"
+        echo "Image: ${{ needs.build-and-push.outputs.image_url }}"
         echo ""
         echo "To deploy to your local Kubernetes cluster:"
         echo "1. Make sure your cluster is running"
         echo "2. Run the following command:"
         echo ""
         echo "   kubectl set image deployment/${{ env.DEPLOYMENT }} \\"
-        echo "     linkding=${{ secrets.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ steps.image_tag.outputs.tag }} \\"
+        echo "     linkding=${{ needs.build-and-push.outputs.image_url }} \\"
         echo "     -n ${{ env.NAMESPACE }}"
         echo ""
         echo "Or use the rolling-update script:"
-        echo "   ./scripts/rolling-update.sh ${{ steps.image_tag.outputs.tag }}"
+        echo "   ./scripts/rolling-update.sh ${{ needs.build-and-push.outputs.image_tag }}"
         echo ""
         echo "=========================================="
-
-    - name: Cleanup temporary files
-      if: always()
-      run: |
-        echo "🧹 Cleaning up temporary files..."
-        
-        # Docker config temizliği
-        if [ -d "/tmp/.docker" ]; then
-          rm -rf /tmp/.docker
-          echo "✅ Cleaned /tmp/.docker"
-        fi
-        
-        # HOME temp dizini temizliği
-        if [ -d "/tmp/docker-home" ]; then
-          rm -rf /tmp/docker-home
-          echo "✅ Cleaned /tmp/docker-home"
-        fi
-        
-        # Kubeconfig temizliği (sadece workflow tarafından oluşturulduysa)
-        if [ -f "$HOME/.kube/config" ] && [ -n "${{ secrets.KUBECONFIG }}" ]; then
-          # Sadece workflow'un oluşturduğu config'i kontrol et
-          if grep -q "kind-cluster" "$HOME/.kube/config" 2>/dev/null; then
-            # Kullanıcının mevcut config'ini korumak için sadece uyarı ver
-            echo "⚠️  Kubeconfig file exists. Manual cleanup may be needed."
-          fi
-        fi
-        
-        # Docker buildx builder temizliği (opsiyonel - builder'ı korumak daha iyi)
-        # docker buildx rm builder 2>/dev/null || true
-        
-        # linkding-source dizini temizliği (opsiyonel - cache için korunabilir)
-        # Eğer her build'de temiz clone istiyorsanız aşağıdaki satırın yorumunu kaldırın:
-        # if [ -d "linkding-source" ]; then
-        #   rm -rf linkding-source
-        #   echo "✅ Cleaned linkding-source directory"
-        # fi
-        
-        echo "✅ Cleanup completed"
