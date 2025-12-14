@@ -140,7 +140,7 @@ jobs:
         kubectl rollout status deployment/${{ env.DEPLOYMENT }} -n ${{ env.NAMESPACE }} --timeout=300s
 
     - name: Verify deployment
-      if: secrets.KUBECONFIG != ''
+      if: ${{ secrets.KUBECONFIG != '' }}
       run: |
         echo "Deployment status:"
         kubectl get deployment/${{ env.DEPLOYMENT }} -n ${{ env.NAMESPACE }}
@@ -154,7 +154,7 @@ jobs:
         kubectl rollout history deployment/${{ env.DEPLOYMENT }} -n ${{ env.NAMESPACE }}
     
     - name: Deployment instructions (if KUBECONFIG not set)
-      if: secrets.KUBECONFIG == ''
+      if: ${{ secrets.KUBECONFIG == '' }}
       run: |
         echo "=========================================="
         echo "Image built and pushed successfully!"
