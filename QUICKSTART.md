@@ -43,16 +43,22 @@ Bu işlem 3-5 dakika sürebilir (pod'ların başlaması için).
 
 Ingress ile erişim için:
 
-1. **`/etc/hosts` dosyasını yapılandırın:**
+1. **LoadBalancer IP'yi alın ve `/etc/hosts` dosyasını yapılandırın:**
    ```bash
    # macOS/Linux
-   echo "127.0.0.1 linkding.local" | sudo tee -a /etc/hosts
+   LB_IP=$(kubectl get svc -n ingress-nginx ingress-nginx-controller -o jsonpath='{.status.loadBalancer.ingress[0].ip}')
+   sudo sed -i.bak '/linkding.local/d' /etc/hosts
+   echo "$LB_IP linkding.local" | sudo tee -a /etc/hosts
    
    # Windows (PowerShell as Administrator)
-   Add-Content C:\Windows\System32\drivers\etc\hosts "127.0.0.1 linkding.local"
+   # $LB_IP = kubectl get svc -n ingress-nginx ingress-nginx-controller -o jsonpath='{.status.loadBalancer.ingress[0].ip}'
+   # (Get-Content C:\Windows\System32\drivers\etc\hosts) | Where-Object { $_ -notmatch 'linkding.local' } | Set-Content C:\Windows\System32\drivers\etc\hosts
+   # Add-Content C:\Windows\System32\drivers\etc\hosts "$LB_IP linkding.local"
    ```
 
 2. **Tarayıcınızda açın:** **http://linkding.local**
+
+**Not:** Port 80 mapping olmadığında LoadBalancer IP kullanılmalıdır. Port mapping varsa `127.0.0.1` kullanılabilir.
 
 **Varsayılan Giriş:**
 - Username: `admin`

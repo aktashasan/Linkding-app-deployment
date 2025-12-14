@@ -189,19 +189,31 @@ Bu script:
 
 **Ingress ile Erişim (Önerilen):**
 
-1. `/etc/hosts` dosyasını yapılandırın:
+1. **LoadBalancer IP'yi alın:**
    ```bash
-   # macOS/Linux
-   echo "127.0.0.1 linkding.local" | sudo tee -a /etc/hosts
-   
-   # Windows (PowerShell as Administrator)
-   Add-Content C:\Windows\System32\drivers\etc\hosts "127.0.0.1 linkding.local"
+   kubectl get svc -n ingress-nginx ingress-nginx-controller -o jsonpath='{.status.loadBalancer.ingress[0].ip}'
    ```
 
-2. Tarayıcıda açın:
+2. **`/etc/hosts` dosyasını yapılandırın:**
+   ```bash
+   # macOS/Linux - LoadBalancer IP ile
+   LB_IP=$(kubectl get svc -n ingress-nginx ingress-nginx-controller -o jsonpath='{.status.loadBalancer.ingress[0].ip}')
+   sudo sed -i.bak '/linkding.local/d' /etc/hosts
+   echo "$LB_IP linkding.local" | sudo tee -a /etc/hosts
+   
+   # Alternatif: Eğer port mapping varsa (port 80 boşsa)
+   # echo "127.0.0.1 linkding.local" | sudo tee -a /etc/hosts
+   
+   # Windows (PowerShell as Administrator)
+   # $LB_IP = kubectl get svc -n ingress-nginx ingress-nginx-controller -o jsonpath='{.status.loadBalancer.ingress[0].ip}'
+   # (Get-Content C:\Windows\System32\drivers\etc\hosts) | Where-Object { $_ -notmatch 'linkding.local' } | Set-Content C:\Windows\System32\drivers\etc\hosts
+   # Add-Content C:\Windows\System32\drivers\etc\hosts "$LB_IP linkding.local"
+   ```
+
+3. **Tarayıcıda açın:**
    - **http://linkding.local**
 
-**Not:** `cloud-provider-kind` sayesinde Kind cluster'ında LoadBalancer service tipi desteklenmektedir. Cluster kurulumu sırasında otomatik olarak kurulur ve başlatılır.
+**Not:** `cloud-provider-kind` sayesinde Kind cluster'ında LoadBalancer service tipi desteklenmektedir. Cluster kurulumu sırasında otomatik olarak kurulur ve başlatılır. Port 80 mapping olmadığında LoadBalancer IP kullanılmalıdır.
 
 **Varsayılan Kullanıcı Bilgileri:**
 - **Username:** `admin`

@@ -113,7 +113,19 @@ echo "To access the application via Ingress:"
 echo "1. Add to /etc/hosts (macOS/Linux):"
 echo "   echo '127.0.0.1 linkding.local' | sudo tee -a /etc/hosts"
 echo ""
-echo "2. Open in browser: http://linkding.local"
+echo "2. Configure /etc/hosts with LoadBalancer IP:"
+LB_IP=$(kubectl get svc -n ingress-nginx ingress-nginx-controller -o jsonpath='{.status.loadBalancer.ingress[0].ip}' 2>/dev/null || echo "")
+if [ -n "$LB_IP" ]; then
+    echo "   LoadBalancer IP: $LB_IP"
+    echo ""
+    echo "   Run this command to update /etc/hosts:"
+    echo "   sudo sed -i.bak '/linkding.local/d' /etc/hosts && echo \"$LB_IP linkding.local\" | sudo tee -a /etc/hosts"
+else
+    echo "   LoadBalancer IP not available yet. Wait a moment and run:"
+    echo "   kubectl get svc -n ingress-nginx ingress-nginx-controller"
+fi
+echo ""
+echo "3. Open in browser: http://linkding.local"
 echo ""
 echo "Default credentials:"
 echo "  Username: admin"
