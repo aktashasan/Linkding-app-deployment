@@ -51,12 +51,17 @@ jobs:
       uses: docker/setup-qemu-action@v3
 
     - name: Set up Docker Buildx
+      id: buildx
       uses: docker/setup-buildx-action@v3
+      with:
+        driver-opts: network=host
 
     - name: Verify Docker Buildx
       run: |
         docker buildx version
         docker buildx ls
+        docker buildx inspect --bootstrap || docker buildx create --use --name builder
+        docker buildx inspect --bootstrap
 
     - name: Log in to Docker Hub
       if: github.event_name != 'workflow_dispatch'
@@ -102,6 +107,7 @@ jobs:
         tags: ${{ secrets.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ steps.image_tag.outputs.tag }}
         cache-from: type=registry,ref=${{ secrets.REGISTRY }}/${{ env.IMAGE_NAME }}:buildcache
         cache-to: type=registry,ref=${{ secrets.REGISTRY }}/${{ env.IMAGE_NAME }}:buildcache,mode=max
+        builder: ${{ steps.buildx.outputs.name }}
         # Note: buildcache image is used for Docker layer caching, this is normal and expected
         # Multi-platform build (amd64 + arm64) for compatibility with different cluster architectures
       env:
