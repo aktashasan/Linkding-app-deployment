@@ -74,6 +74,7 @@ spec:
       containers:
       - name: postgres
         image: postgres:15-alpine
+        imagePullPolicy: IfNotPresent
         ports:
         - containerPort: 5432
           name: postgres
@@ -162,7 +163,8 @@ spec:
     spec:
       containers:
       - name: linkding
-        image: sissbruecker/linkding:1.22.0
+        image: sissbruecker/linkding:latest
+        imagePullPolicy: IfNotPresent
         ports:
         - containerPort: 9090
           name: http
@@ -244,6 +246,15 @@ spec:
           limits:
             memory: "512Mi"
             cpu: "500m"
+        startupProbe:
+          httpGet:
+            path: /login/
+            port: 9090
+          initialDelaySeconds: 10
+          periodSeconds: 5
+          timeoutSeconds: 3
+          successThreshold: 1
+          failureThreshold: 30
         livenessProbe:
           httpGet:
             path: /login/
@@ -265,6 +276,7 @@ spec:
       initContainers:
       - name: wait-for-postgres
         image: postgres:15-alpine
+        imagePullPolicy: IfNotPresent
         command:
         - sh
         - -c
@@ -323,4 +335,15 @@ spec:
             name: linkding
             port:
               number: 80
+---
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: linkding-pdb
+  namespace: linkding
+spec:
+  minAvailable: 1
+  selector:
+    matchLabels:
+      app: linkding
 
