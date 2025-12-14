@@ -126,7 +126,6 @@ jobs:
         fi
 
     # Step 3: Deploy to Kubernetes cluster
-    # Image is already pushed to Docker Hub in previous step
     - name: Deploy to Kubernetes
       if: steps.kubeconfig_check.outputs.kubeconfig_available == 'true'
       run: |
