@@ -22,7 +22,7 @@ env:
 
 jobs:
   build-and-deploy:
-    runs-on: ubuntu-latest
+    runs-on: self-hosted
     permissions:
       contents: read
       packages: write
@@ -66,6 +66,8 @@ jobs:
           echo "tag=${{ github.sha }}" >> $GITHUB_OUTPUT
         fi
 
+    # Step 1: Build and push Docker image to Docker Hub
+    # This must happen BEFORE deployment to ensure the image is available
     - name: Build and push Docker image
       uses: docker/build-push-action@v5
       with:
@@ -77,6 +79,8 @@ jobs:
         cache-from: type=registry,ref=${{ secrets.REGISTRY }}/${{ env.IMAGE_NAME }}:buildcache
         cache-to: type=registry,ref=${{ secrets.REGISTRY }}/${{ env.IMAGE_NAME }}:buildcache,mode=max
 
+    # Step 2: Set up kubectl for Kubernetes deployment
+    # Only proceed if KUBECONFIG secret is available
     - name: Set up kubectl
       uses: azure/setup-kubectl@v3
       with:
@@ -96,17 +100,47 @@ jobs:
           echo "  Then add it as a GitHub secret: KUBECONFIG"
         fi
 
+    # Step 3: Deploy to Kubernetes cluster
+    # Image is already pushed to Docker Hub in previous step
     - name: Deploy to Kubernetes
+      if: secrets.KUBECONFIG != ''
       run: |
-        # Image tag'ini güncelle
+        echo "Deploying image: ${{ secrets.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ steps.image_tag.outputs.tag }}"
+        echo "Note: Image was already pushed to Docker Hub in previous step"
+        echo "Namespace: ${{ env.NAMESPACE }}"
+        echo "Deployment: ${{ env.DEPLOYMENT }}"
+        
+        # Cluster bağlantısını kontrol et
+        kubectl cluster-info || {
+          echo "ERROR: Cannot connect to Kubernetes cluster"
+          exit 1
+        }
+        
+        # Namespace'in var olduğundan emin ol
+        if ! kubectl get namespace ${{ env.NAMESPACE }} &>/dev/null; then
+          echo "WARNING: Namespace ${{ env.NAMESPACE }} does not exist. Creating..."
+          kubectl create namespace ${{ env.NAMESPACE }}
+        fi
+        
+        # Deployment'ın var olduğundan emin ol
+        if ! kubectl get deployment/${{ env.DEPLOYMENT }} -n ${{ env.NAMESPACE }} &>/dev/null; then
+          echo "WARNING: Deployment ${{ env.DEPLOYMENT }} does not exist in namespace ${{ env.NAMESPACE }}"
+          echo "Please deploy the application first using: ./setup.sh"
+          exit 1
+        fi
+        
+        # Image tag'ini güncelle (rolling update)
+        echo "Updating deployment image..."
         kubectl set image deployment/${{ env.DEPLOYMENT }} \
           linkding=${{ secrets.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ steps.image_tag.outputs.tag }} \
           -n ${{ env.NAMESPACE }}
-
+        
         # Rolling update durumunu bekle
+        echo "Waiting for rollout to complete..."
         kubectl rollout status deployment/${{ env.DEPLOYMENT }} -n ${{ env.NAMESPACE }} --timeout=300s
 
     - name: Verify deployment
+      if: secrets.KUBECONFIG != ''
       run: |
         echo "Deployment status:"
         kubectl get deployment/${{ env.DEPLOYMENT }} -n ${{ env.NAMESPACE }}
@@ -118,3 +152,25 @@ jobs:
         echo ""
         echo "Rollout history:"
         kubectl rollout history deployment/${{ env.DEPLOYMENT }} -n ${{ env.NAMESPACE }}
+    
+    - name: Deployment instructions (if KUBECONFIG not set)
+      if: secrets.KUBECONFIG == ''
+      run: |
+        echo "=========================================="
+        echo "Image built and pushed successfully!"
+        echo "=========================================="
+        echo ""
+        echo "Image: ${{ secrets.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ steps.image_tag.outputs.tag }}"
+        echo ""
+        echo "To deploy to your local Kubernetes cluster:"
+        echo "1. Make sure your cluster is running"
+        echo "2. Run the following command:"
+        echo ""
+        echo "   kubectl set image deployment/${{ env.DEPLOYMENT }} \\"
+        echo "     linkding=${{ secrets.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ steps.image_tag.outputs.tag }} \\"
+        echo "     -n ${{ env.NAMESPACE }}"
+        echo ""
+        echo "Or use the rolling-update script:"
+        echo "   ./scripts/rolling-update.sh ${{ steps.image_tag.outputs.tag }}"
+        echo ""
+        echo "=========================================="

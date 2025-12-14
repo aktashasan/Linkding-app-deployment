@@ -311,6 +311,71 @@ postgres pod not ready
 
 ---
 
+### 11. GitHub Actions'tan Lokal Kubernetes Cluster'a Deploy Sorunu
+
+**Sorun:**
+```
+GitHub Actions runner'ları cloud'da çalışır ve lokal bilgisayarınızdaki Kind cluster'a erişemez.
+KUBECONFIG secret'ı ekleseniz bile, cloud runner lokal network'e erişemez.
+```
+
+**Neden:**
+- GitHub Actions runner'ları GitHub'ın cloud sunucularında çalışır
+- Lokal bilgisayarınızdaki Kind cluster'a network erişimi yok
+- KUBECONFIG olsa bile cluster'a bağlanamaz
+
+**Çözüm:**
+Self-hosted runner kullanın (lokal bilgisayarınızda GitHub Actions runner çalıştırın):
+
+1. **Self-hosted runner kurulumu:**
+   ```bash
+   # Runner indir
+   mkdir -p ~/actions-runner && cd ~/actions-runner
+   curl -o actions-runner-osx-x64-2.311.0.tar.gz -L \
+     https://github.com/actions/runner/releases/download/v2.311.0/actions-runner-osx-x64-2.311.0.tar.gz
+   tar xzf ./actions-runner-osx-x64-2.311.0.tar.gz
+   
+   # GitHub'dan token al:
+   # Repository → Settings → Actions → Runners → New self-hosted runner
+   
+   # Config et
+   ./config.sh --url https://github.com/YOUR-USERNAME/YOUR-REPO --token YOUR-TOKEN
+   
+   # Service olarak başlat (önerilen)
+   sudo ./svc.sh install
+   sudo ./svc.sh start
+   ```
+
+2. **Workflow'u güncelleyin:**
+   ```yaml
+   jobs:
+     build-and-deploy:
+       runs-on: self-hosted  # ubuntu-latest yerine
+   ```
+
+3. **KUBECONFIG secret'ını ekleyin:**
+   ```bash
+   # Kind cluster için
+   kind export kubeconfig --name kind-cluster | base64
+   
+   # GitHub → Settings → Secrets → Actions → New secret
+   # Name: KUBECONFIG
+   # Value: (base64 çıktısı)
+   ```
+
+**Alternatif Çözümler:**
+- **Manuel Deploy**: CI/CD sadece build ve push yapar, deploy'u manuel yaparsınız
+- **Cloud Cluster**: GKE, EKS, AKS gibi cloud cluster kullanın (production için)
+
+**Dosyalar:**
+- `.github/workflows/ci-cd.yml` - `runs-on: self-hosted` olarak güncellendi
+- `SELF-HOSTED-RUNNER-SETUP.md` - Detaylı kurulum rehberi
+- `DEPLOYMENT-OPTIONS.md` - Tüm deploy seçenekleri
+
+**Not:** Self-hosted runner çalışırken bilgisayarınız açık olmalı.
+
+---
+
 ## Genel Sorun Giderme Adımları
 
 ### Pod'lar Başlamıyor
@@ -387,6 +452,7 @@ kubectl port-forward service/linkding 8080:80 -n linkding
 | 8 | kind-config.yaml path sorunu | ✅ Çözüldü | SCRIPT_DIR değişkeni eklendi |
 | 9 | Linkding login sorunu (CSRF) | ✅ Çözüldü | CSRF_TRUSTED_ORIGINS ve session affinity eklendi |
 | 10 | PostgreSQL not ready | ✅ Çözüldü | StorageClass ve PVC kontrolleri eklendi |
+| 11 | GitHub Actions lokal cluster deploy | ✅ Çözüldü | Self-hosted runner kuruldu |
 
 ---
 
