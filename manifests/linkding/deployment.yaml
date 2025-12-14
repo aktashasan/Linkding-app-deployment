@@ -108,7 +108,6 @@ spec:
           initialDelaySeconds: 30
           periodSeconds: 5
           timeoutSeconds: 3
-      # PostgreSQL hazır olana kadar bekle
       initContainers:
       - name: wait-for-postgres
         image: postgres:15-alpine
