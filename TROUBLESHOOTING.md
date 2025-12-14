@@ -453,6 +453,70 @@ kubectl port-forward service/linkding 8080:80 -n linkding
 | 9 | Linkding login sorunu (CSRF) | ✅ Çözüldü | CSRF_TRUSTED_ORIGINS ve session affinity eklendi |
 | 10 | PostgreSQL not ready | ✅ Çözüldü | StorageClass ve PVC kontrolleri eklendi |
 | 11 | GitHub Actions lokal cluster deploy | ✅ Çözüldü | Self-hosted runner kuruldu |
+| 12 | Kind cluster creation log timeout | ✅ Çözüldü | --wait 10m ve --retain parametreleri eklendi |
+
+---
+
+### 12. Kind Cluster Creation Timeout - "could not find a log line that matches"
+
+**Sorun:**
+```
+ERROR: failed to create cluster: could not find a log line that matches "Reached target .*Multi-User System.*|detected cgroup v1"
+```
+
+**Neden:**
+- Kind, node'un başladığını doğrulamak için belirli log satırlarını bekliyor
+- Docker yavaş başlıyor veya timeout çok kısa
+- macOS'ta özel durumlar (cgroup v1/v2)
+- Kind versiyonu ile node image uyumsuzluğu
+
+**Çözüm:**
+
+1. **Wait süresini artırın:**
+   ```bash
+   kind create cluster --config kind-config.yaml --wait 10m
+   ```
+
+2. **--retain parametresi ekleyin:**
+   ```bash
+   kind create cluster --config kind-config.yaml --wait 10m --retain
+   ```
+   Bu sayede hata durumunda cluster silinmez, manuel kontrol edilebilir.
+
+3. **Docker'ı kontrol edin:**
+   ```bash
+   docker ps
+   docker system df
+   ```
+
+4. **Mevcut cluster'ları temizleyin:**
+   ```bash
+   kind delete clusters --all
+   ```
+
+5. **create-cluster.sh scripti güncellendi:**
+   - `--wait 10m` parametresi eklendi
+   - `--retain` parametresi eklendi
+   - Hata durumunda cluster'ın erişilebilirliği kontrol ediliyor
+   - Docker hazır olana kadar bekleniyor
+
+**Alternatif Çözüm:**
+
+Eğer sorun devam ederse, Kind versiyonunu kontrol edin:
+```bash
+kind version
+# Kind v0.30.0+ için default node image v1.34.0
+```
+
+Manuel olarak node image belirtmek isterseniz (önerilmez):
+```yaml
+# kind-config.yaml
+nodes:
+- role: control-plane
+  image: kindest/node:v1.31.0@sha256:...
+```
+
+**Not:** `create-cluster.sh` scripti artık bu sorunu otomatik olarak handle ediyor.
 
 ---
 

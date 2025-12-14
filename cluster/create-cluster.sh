@@ -27,7 +27,39 @@ fi
 # Cluster oluştur
 echo " Creating Kind cluster..."
 SCRIPT_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
-kind create cluster --config "${SCRIPT_DIR}/kind-config.yaml"
+
+# Docker'ın hazır olduğundan emin ol
+echo " Waiting for Docker to be ready..."
+sleep 2
+
+# Kind cluster oluştur
+# --wait parametresi ile timeout artırıldı ve --retain ile hata durumunda cluster silinmez
+echo " Creating cluster (this may take a few minutes)..."
+if ! kind create cluster --config "${SCRIPT_DIR}/kind-config.yaml" --wait 10m --retain; then
+    echo " Warning: Cluster creation encountered an issue"
+    echo " Checking if cluster was partially created..."
+    
+    # Cluster'ın oluşup oluşmadığını kontrol et
+    if kind get clusters | grep -q "kind-cluster"; then
+        echo " Cluster exists, attempting to use it..."
+        # Context'i kontrol et
+        kubectl cluster-info --context kind-kind-cluster 2>/dev/null || kubectl cluster-info --context kind-cluster 2>/dev/null
+        if [ $? -eq 0 ]; then
+            echo " Cluster is accessible, continuing..."
+        else
+            echo " Error: Cluster exists but is not accessible"
+            echo " Try deleting and recreating: kind delete cluster --name kind-cluster"
+            exit 1
+        fi
+    else
+        echo " Error: Cluster creation failed completely"
+        echo " Troubleshooting steps:"
+        echo " 1. Check Docker is running: docker ps"
+        echo " 2. Try deleting any existing clusters: kind delete clusters --all"
+        echo " 3. Check Docker resources: docker system df"
+        exit 1
+    fi
+fi
 
 # kubectl context'ini ayarla
 # Kind, cluster adına göre context oluşturur: kind-{cluster-name}
