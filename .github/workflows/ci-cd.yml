@@ -30,7 +30,7 @@ jobs:
     
     outputs:
       image_tag: ${{ steps.image_tag.outputs.tag }}
-      image_url: ${{ secrets.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ steps.image_tag.outputs.tag }}
+      image_url: ${{ steps.image_url.outputs.url }}
 
     steps:
     - name: Checkout code
@@ -75,6 +75,17 @@ jobs:
           echo "tag=${{ github.sha }}" >> $GITHUB_OUTPUT
         fi
 
+    - name: Set image URL
+      id: image_url
+      run: |
+        REGISTRY="${{ secrets.REGISTRY }}"
+        if [ -z "$REGISTRY" ]; then
+          REGISTRY="docker.io"
+        fi
+        IMAGE_URL="${REGISTRY}/${{ env.IMAGE_NAME }}:${{ steps.image_tag.outputs.tag }}"
+        echo "url=${IMAGE_URL}" >> $GITHUB_OUTPUT
+        echo "Image URL: ${IMAGE_URL}"
+
     - name: Build and push Docker image
       uses: docker/build-push-action@v5
       with:
@@ -103,19 +114,73 @@ jobs:
     - name: Configure kubectl
       id: kubeconfig_check
       run: |
-        # Kubernetes cluster kubeconfig'ini secret'tan al
+        mkdir -p ~/.kube
+        
+        # Öncelik 1: Kind cluster'dan direkt kubeconfig export et (en güvenilir)
+        if command -v kind &> /dev/null; then
+          KIND_CLUSTERS=$(kind get clusters 2>/dev/null || echo "")
+          if [ -n "$KIND_CLUSTERS" ]; then
+            KIND_CLUSTER=$(echo "$KIND_CLUSTERS" | head -1 | tr -d '[:space:]')
+            echo "✅ Found Kind cluster: $KIND_CLUSTER"
+            echo "Exporting fresh kubeconfig..."
+            kind export kubeconfig --name "$KIND_CLUSTER" --kubeconfig ~/.kube/config
+            
+            if kubectl cluster-info --request-timeout=10s 2>/dev/null; then
+              echo "✅ Cluster connection successful!"
+              echo "kubeconfig_available=true" >> $GITHUB_OUTPUT
+              exit 0
+            else
+              echo "⚠️  Cannot connect after Kind export, trying other methods..."
+            fi
+          else
+            echo "⚠️  No Kind clusters found"
+          fi
+        else
+          echo "⚠️  Kind command not found"
+        fi
+        
+        # Öncelik 2: GitHub secret'tan kubeconfig kullan
         if [ -n "${{ secrets.KUBECONFIG }}" ]; then
-          mkdir -p ~/.kube
+          echo "Trying kubeconfig from GitHub secret..."
           echo "${{ secrets.KUBECONFIG }}" | base64 -d > ~/.kube/config
           chmod 600 ~/.kube/config
-          echo "kubeconfig_available=true" >> $GITHUB_OUTPUT
-        else
-          echo "ERROR: KUBECONFIG secret not set. Please configure kubectl manually."
-          echo "For Kind cluster, you can use:"
-          echo "  kind export kubeconfig --name kind-cluster"
-          echo "  Then add it as a GitHub secret: KUBECONFIG"
-          echo "kubeconfig_available=false" >> $GITHUB_OUTPUT
+          
+          if kubectl cluster-info --request-timeout=10s 2>/dev/null; then
+            echo "✅ Cluster connection successful with secret kubeconfig!"
+            echo "kubeconfig_available=true" >> $GITHUB_OUTPUT
+            exit 0
+          else
+            echo "⚠️  Cannot connect with secret kubeconfig"
+          fi
         fi
+        
+        # Öncelik 3: Default kubeconfig
+        if [ -f "$HOME/.kube/config" ]; then
+          echo "Trying default kubeconfig at $HOME/.kube/config..."
+          if kubectl cluster-info --request-timeout=10s 2>/dev/null; then
+            echo "✅ Cluster connection successful with default kubeconfig!"
+            echo "kubeconfig_available=true" >> $GITHUB_OUTPUT
+            exit 0
+          fi
+        fi
+        
+        # Hiçbir yöntem çalışmadı
+        echo "❌ ERROR: Cannot connect to Kubernetes cluster"
+        echo ""
+        echo "Troubleshooting:"
+        echo "1. Check if Kind cluster is running:"
+        echo "   kind get clusters"
+        echo ""
+        echo "2. If cluster exists, test connection:"
+        echo "   kind export kubeconfig --name kind-cluster"
+        echo "   kubectl cluster-info"
+        echo ""
+        echo "3. If working locally, update GitHub secret:"
+        echo "   kind export kubeconfig --name kind-cluster | base64"
+        echo "   Add output as KUBECONFIG secret in GitHub"
+        echo ""
+        echo "kubeconfig_available=false" >> $GITHUB_OUTPUT
+        exit 1
 
     - name: Deploy to Kubernetes
       if: steps.kubeconfig_check.outputs.kubeconfig_available == 'true'
