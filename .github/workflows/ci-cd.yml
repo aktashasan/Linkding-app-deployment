@@ -52,18 +52,23 @@ jobs:
 
     - name: Log in to Docker Hub
       if: github.event_name != 'workflow_dispatch'
-      timeout-minutes: 2
+      timeout-minutes: 1
       run: |
+        set -e
         export DOCKER_CONFIG=/tmp/.docker
         export HOME=/tmp/docker-home
         mkdir -p "$DOCKER_CONFIG" "$HOME"
-        echo '{}' > "$DOCKER_CONFIG/config.json"
-        REGISTRY_URL="${{ secrets.REGISTRY }}"
-        if [ -z "$REGISTRY_URL" ]; then
-          REGISTRY_URL="docker.io"
-        fi
-        echo "${{ secrets.DOCKER_PASSWORD }}" | docker login "$REGISTRY_URL" -u "${{ secrets.DOCKER_USERNAME }}" --password-stdin
-        echo "✅ Docker login successful to $REGISTRY_URL"
+        
+        USERNAME="${{ secrets.DOCKER_USERNAME }}"
+        PASSWORD="${{ secrets.DOCKER_PASSWORD }}"
+        
+        # Base64 encode (printf daha güvenilir)
+        AUTH_STRING=$(printf '%s' "${USERNAME}:${PASSWORD}" | base64)
+        
+        # JSON'ı tek satırda oluştur (heredoc yerine - daha hızlı ve güvenilir)
+        echo "{\"auths\":{\"https://index.docker.io/v1/\":{\"auth\":\"${AUTH_STRING}\"},\"docker.io\":{\"auth\":\"${AUTH_STRING}\"}},\"credsStore\":\"\"}" > "$DOCKER_CONFIG/config.json"
+        
+        echo "✅ Docker credentials configured"
       env:
         DOCKER_CONFIG: /tmp/.docker
         HOME: /tmp/docker-home
