@@ -47,7 +47,7 @@ Bu proje aşağıdaki bileşenleri içermektedir:
 ## 📁 Proje Yapısı
 
 ```
-case-study/
+.
 ├── README.md                    # Bu dosya
 ├── QUICKSTART.md                # Hızlı başlangıç rehberi
 ├── TROUBLESHOOTING.md           # Sorun giderme rehberi
@@ -64,7 +64,6 @@ case-study/
 │   ├── rolling-update.sh        # Rolling update scripti
 │   ├── rollback.sh              # Rollback scripti
 │   ├── cleanup.sh               # Temizleme scripti
-│   └── port-forward.sh          # Port-forward scripti
 │
 ├── linkding-source/             # Linkding kaynak kodu (git submodule)
 │   └── docker/
@@ -128,44 +127,15 @@ sudo mv ./kind /usr/local/bin/kind
 # Go kurulumu için: https://go.dev/doc/install
 ```
 
-### Sistem Gereksinimleri
-
-- **RAM**: Minimum 4GB (önerilen: 8GB+)
-- **Disk**: Minimum 10GB boş alan
-- **CPU**: 2+ core (önerilen)
-
 ## 🚀 Kurulum
-
-### Hızlı Başlangıç
-
-```bash
-# 1. Repository'yi klonlayın
-git clone https://github.com/aktashasan/Linkding-app-deployment.git
-cd case-study
-
-# 2. Git submodule'ları güncelleyin
-git submodule update --init --recursive
-
-# 3. Cluster'ı oluşturun
-./cluster/create-cluster.sh
-
-# 4. Uygulamayı deploy edin
-./setup.sh
-
-# 5. Erişim için /etc/hosts'a ekleyin
-echo "127.0.0.1 linkding.local" | sudo tee -a /etc/hosts
-
-# 6. Tarayıcıda açın
-# http://linkding.local
-```
 
 ### Detaylı Kurulum Adımları
 
 #### 1. Repository'yi Klonlayın
 
 ```bash
-git clone <repository-url>
-cd case-study
+git clone https://github.com/aktashasan/Linkding-app-deployment.git
+cd Linkding-app-deployment
 ```
 
 #### 2. Git Submodule'ları Güncelleyin
@@ -200,6 +170,9 @@ Bu script:
 
 Bu script:
 - ✅ Cluster erişimini doğrular (`kubectl get nodes`)
+- ✅ Manifestleri apply eder
+- ✅ Temel otomasyonu sağlar
+- ✅ Cluster erişimini doğrular (`kubectl get nodes`)
 - ✅ StorageClass'ı kontrol eder/oluşturur
 - ✅ Tüm Kubernetes manifestlerini apply eder
 - ✅ PostgreSQL'in hazır olmasını bekler
@@ -227,13 +200,6 @@ Bu script:
    - **http://linkding.local**
 
 **Not:** `cloud-provider-kind` sayesinde Kind cluster'ında LoadBalancer service tipi desteklenmektedir. Cluster kurulumu sırasında otomatik olarak kurulur ve başlatılır.
-
-**Port-Forward ile Erişim (Alternatif):**
-
-```bash
-./scripts/port-forward.sh
-# Sonra: http://localhost:9090
-```
 
 **Varsayılan Kullanıcı Bilgileri:**
 - **Username:** `admin`
@@ -269,12 +235,7 @@ kubectl logs -f deployment/linkding -n linkding
 # PostgreSQL pod logları
 kubectl logs -f deployment/postgres -n linkding
 
-# Belirli bir pod'un logları
-kubectl logs <pod-name> -n linkding
 
-# Önceki container'ın logları (restart olmuşsa)
-kubectl logs <pod-name> -n linkding --previous
-```
 
 ### ConfigMap ve Secret'ları Görüntüleme
 
@@ -322,7 +283,7 @@ Bu script:
 ```bash
 # Mevcut: sissbruecker/linkding:1.22.0
 # Yeni: sissbruecker/linkding:1.23.0
-./scripts/rolling-update.sh 1.23.0
+./scripts/rolling-update.sh v1.23.0
 ```
 
 ### Rollback
@@ -343,25 +304,18 @@ Bu script:
 ### Manuel Rollout Komutları
 
 ```bash
-# Rolling update başlat
 kubectl set image deployment/linkding \
   linkding=sissbruecker/linkding:v1.23.0 \
   -n linkding
 
-# Rollout durumunu izle
 kubectl rollout status deployment/linkding -n linkding
 
-# Rollback yap
 kubectl rollout undo deployment/linkding -n linkding
 
-# Belirli bir revision'a rollback yap
 kubectl rollout undo deployment/linkding -n linkding --to-revision=2
 
-# Rollout geçmişini görüntüle
 kubectl rollout history deployment/linkding -n linkding
 
-# Belirli bir revision'ın detaylarını görüntüle
-kubectl rollout history deployment/linkding -n linkding --revision=2
 ```
 
 ## 🔧 CI/CD Pipeline
@@ -387,7 +341,7 @@ Detaylı kurulum için: [CI-CD-SETUP.md](CI-CD-SETUP.md)
 - `APPLICATION_NAME`: Uygulama adı (örn: `linkding`)
 - `NAMESPACE`: Kubernetes namespace (örn: `linkding`)
 - `DEPLOYMENT`: Deployment adı (örn: `linkding`)
-- `KUBECONFIG`: Kubernetes cluster config (base64 encoded) - Opsiyonel
+- `KUBECONFIG`: Kubernetes cluster config (base64 encoded) 
 
 ### Self-Hosted Runner Kurulumu
 
@@ -398,9 +352,10 @@ Detaylı kurulum için: [SELF-HOSTED-RUNNER-SETUP.md](SELF-HOSTED-RUNNER-SETUP.m
 ### Workflow Kullanımı
 
 **Otomatik Trigger:**
-- `main` branch'ine push
+- `main` branch'ine push (sadece belirli dosyalarda değişiklik olduğunda)
 - `linkding-source/` klasöründe değişiklik
-- `manifests/` klasöründe değişiklik
+- `manifests.yaml` dosyasında değişiklik
+- `.github/workflows/ci-cd.yml` dosyasında değişiklik
 
 **Manuel Trigger:**
 1. GitHub → Actions → CI/CD Pipeline
@@ -462,6 +417,8 @@ kubectl exec -n linkding deployment/linkding -c linkding -- python manage.py mig
 
 **Sorun:** Ingress çalışmıyor veya erişilemiyor
 
+**Not:** Kind cluster'ında varsayılan olarak LoadBalancer service tipi desteklenmez, ancak `cloud-provider-kind` ile bu özellik sağlanmaktadır. Cluster kurulumu sırasında (`./cluster/create-cluster.sh`) `cloud-provider-kind` otomatik olarak kurulur ve başlatılır, böylece LoadBalancer desteği aktif hale gelir.
+
 **Çözüm:**
 ```bash
 # Ingress controller'ın çalıştığını kontrol et
@@ -471,8 +428,8 @@ kubectl get pods -n ingress-nginx
 kubectl get ingress -n linkding
 kubectl describe ingress linkding-ingress -n linkding
 
-# Alternatif: Port-forward kullan
-./scripts/port-forward.sh
+# cloud-provider-kind'ın çalıştığını kontrol et
+pgrep -f cloud-provider-kind
 ```
 
 ### 5. Linkding Login Sorunu
@@ -582,10 +539,3 @@ kubectl rollout status deployment/linkding -n linkding > screenshots/rolling-upd
 kubectl rollout history deployment/linkding -n linkding > screenshots/rollout-history.txt
 ```
 
-## 📄 Lisans
-
-Bu proje Kubernetes öğrenme ve pratik yapma amaçlı hazırlanmıştır.
-
-## 🤝 Katkıda Bulunma
-
-Sorun bildirimi veya öneriler için GitHub Issues kullanabilirsiniz.

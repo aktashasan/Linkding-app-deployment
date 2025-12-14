@@ -37,30 +37,26 @@ cd ..
 
 Bu işlem 3-5 dakika sürebilir (pod'ların başlaması için).
 
-### 4. Uygulamaya Eriş (Port-Forward)
+### 4. Uygulamaya Eriş (Ingress)
 
-Kind cluster'ında port-forward kullanarak erişin:
+Ingress ile erişim için:
 
-```bash
-# Script ile (varsayılan 9090 portu)
-./scripts/port-forward.sh
+1. **`/etc/hosts` dosyasını yapılandırın:**
+   ```bash
+   # macOS/Linux
+   echo "127.0.0.1 linkding.local" | sudo tee -a /etc/hosts
+   
+   # Windows (PowerShell as Administrator)
+   Add-Content C:\Windows\System32\drivers\etc\hosts "127.0.0.1 linkding.local"
+   ```
 
-# Veya manuel olarak Linkding service'ine port-forward yapın
-kubectl port-forward -n linkding service/linkding 9090:80
-```
-
-**Arka planda çalıştırmak için:**
-```bash
-kubectl port-forward -n linkding service/linkding 9090:80 &
-```
-
-Tarayıcınızda açın: **http://localhost:9090**
+2. **Tarayıcınızda açın:** **http://linkding.local**
 
 **Varsayılan Giriş:**
 - Username: `admin`
 - Password: `admin`
 
-**Not:** Port-forward'u durdurmak için `Ctrl+C` veya process'i sonlandırın.
+**Not:** `cloud-provider-kind` sayesinde Kind cluster'ında LoadBalancer desteği aktif. Ingress controller port mapping (80:80, 443:443) ile çalışır.
 
 ## 🧪 Test Senaryoları
 
@@ -93,7 +89,7 @@ kubectl logs -f deployment/linkding -n linkding
 ./scripts/cleanup.sh
 
 # Cluster'ı sil (isteğe bağlı)
-kind delete cluster --name case-study-cluster
+kind delete cluster --name kind-cluster
 ```
 
 ## 📸 Screenshot Alma

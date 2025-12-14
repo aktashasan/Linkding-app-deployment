@@ -10,7 +10,7 @@ Bu yöntem, Linkding kaynak kodunu ayrı bir repository olarak tutar ve daha tem
 
 1. **Mevcut linkding-source klasörünü silin:**
    ```bash
-   cd /Users/hasanaktas/ankasoft-project/k8s-orchestration/case-study
+   cd <proje-kök-dizini>
    rm -rf linkding-source
    ```
 
@@ -46,7 +46,7 @@ Bu yöntem, Linkding kaynak kodunu direkt repository'nize ekler.
 
 2. **linkding-source'u git'e ekleyin:**
    ```bash
-   cd /Users/hasanaktas/ankasoft-project/k8s-orchestration/case-study
+   cd <proje-kök-dizini>
    git add linkding-source
    git commit -m "Add Linkding source code"
    git push origin main
@@ -88,7 +88,7 @@ Bu yöntem, GitHub Actions workflow'unda Linkding'i clone eder.
 ### Tam Kurulum:
 
 ```bash
-cd /Users/hasanaktas/ankasoft-project/k8s-orchestration/case-study
+cd <proje-kök-dizini>
 
 # Mevcut klasörü sil
 rm -rf linkding-source

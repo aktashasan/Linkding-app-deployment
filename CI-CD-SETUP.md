@@ -14,7 +14,6 @@ Bu dokümanda GitHub Actions CI/CD pipeline'ının nasıl kurulacağı açıklan
 
 Linkding kaynak kodu `linkding-source/` klasörüne clone edilmiştir. 
 
-**Not:** Production ortamında git submodule kullanılması önerilir:
 
 ```bash
 git submodule add https://github.com/sissbruecker/linkding.git linkding-source
@@ -53,9 +52,10 @@ GitHub repository'nizde aşağıdaki secrets'ları ekleyin:
 CI/CD workflow'u `.github/workflows/ci-cd.yml` dosyasında tanımlıdır.
 
 **Trigger'lar:**
-- `main` veya `master` branch'ine push
+- `main` branch'ine push (sadece belirli dosyalarda değişiklik olduğunda)
 - `linkding-source/` klasöründe değişiklik
-- `manifests/` klasöründe değişiklik
+- `manifests.yaml` dosyasında değişiklik
+- `.github/workflows/ci-cd.yml` dosyasında değişiklik
 - Manuel trigger (workflow_dispatch)
 
 ### 4. Image Tag Stratejisi
