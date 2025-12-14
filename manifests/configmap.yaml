@@ -9,7 +9,6 @@ data:
   LD_DB_USER: "linkding"
   LD_DB_HOST: "postgres"
   LD_DB_PORT: "5432"
-
   LD_SUPERUSER_NAME: "admin"
   LD_SUPERUSER_EMAIL: "admin@example.com"
   LD_DISABLE_BACKGROUND_TASKS: "false"
