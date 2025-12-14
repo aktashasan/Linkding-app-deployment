@@ -87,23 +87,26 @@ jobs:
         version: 'latest'
 
     - name: Configure kubectl
+      id: kubeconfig_check
       run: |
         # Kubernetes cluster kubeconfig'ini secret'tan al
         if [ -n "${{ secrets.KUBECONFIG }}" ]; then
           mkdir -p ~/.kube
           echo "${{ secrets.KUBECONFIG }}" | base64 -d > ~/.kube/config
           chmod 600 ~/.kube/config
+          echo "kubeconfig_available=true" >> $GITHUB_OUTPUT
         else
           echo "ERROR: KUBECONFIG secret not set. Please configure kubectl manually."
           echo "For Kind cluster, you can use:"
           echo "  kind export kubeconfig --name kind-cluster"
           echo "  Then add it as a GitHub secret: KUBECONFIG"
+          echo "kubeconfig_available=false" >> $GITHUB_OUTPUT
         fi
 
     # Step 3: Deploy to Kubernetes cluster
     # Image is already pushed to Docker Hub in previous step
     - name: Deploy to Kubernetes
-      if: secrets.KUBECONFIG != ''
+      if: steps.kubeconfig_check.outputs.kubeconfig_available == 'true'
       run: |
         echo "Deploying image: ${{ secrets.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ steps.image_tag.outputs.tag }}"
         echo "Note: Image was already pushed to Docker Hub in previous step"
@@ -140,7 +143,7 @@ jobs:
         kubectl rollout status deployment/${{ env.DEPLOYMENT }} -n ${{ env.NAMESPACE }} --timeout=300s
 
     - name: Verify deployment
-      if: ${{ secrets.KUBECONFIG != '' }}
+      if: steps.kubeconfig_check.outputs.kubeconfig_available == 'true'
       run: |
         echo "Deployment status:"
         kubectl get deployment/${{ env.DEPLOYMENT }} -n ${{ env.NAMESPACE }}
@@ -154,7 +157,7 @@ jobs:
         kubectl rollout history deployment/${{ env.DEPLOYMENT }} -n ${{ env.NAMESPACE }}
     
     - name: Deployment instructions (if KUBECONFIG not set)
-      if: ${{ secrets.KUBECONFIG == '' }}
+      if: steps.kubeconfig_check.outputs.kubeconfig_available == 'false'
       run: |
         echo "=========================================="
         echo "Image built and pushed successfully!"
