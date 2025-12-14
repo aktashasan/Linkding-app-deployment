@@ -16,7 +16,7 @@ on:
         default: 'latest'
 
 env:
-  IMAGE_NAME: ${{ secrets.DOCKER_USERNAME }}/ ${{ secrets.APPLICATION_NAME }}
+  IMAGE_NAME: ${{ secrets.DOCKER_USERNAME }}/${{ secrets.APPLICATION_NAME }}
   NAMESPACE: ${{ secrets.NAMESPACE }}
   DEPLOYMENT: ${{ secrets.DEPLOYMENT }}
 
