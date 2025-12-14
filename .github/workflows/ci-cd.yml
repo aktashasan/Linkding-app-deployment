@@ -185,10 +185,34 @@ jobs:
     - name: Deploy to Kubernetes
       if: steps.kubeconfig_check.outputs.kubeconfig_available == 'true'
       run: |
-        echo "Deploying image: ${{ needs.build-and-push.outputs.image_url }}"
-        echo "Image tag: ${{ needs.build-and-push.outputs.image_tag }}"
+        # Image URL'i oluştur (fallback ile)
+        IMAGE_TAG="${{ needs.build-and-push.outputs.image_tag }}"
+        IMAGE_URL="${{ needs.build-and-push.outputs.image_url }}"
+        
+        # Eğer image_url boşsa, manuel oluştur
+        if [ -z "$IMAGE_URL" ]; then
+          echo "⚠️  image_url output is empty, constructing manually..."
+          REGISTRY="${{ secrets.REGISTRY }}"
+          if [ -z "$REGISTRY" ]; then
+            REGISTRY="docker.io"
+          fi
+          IMAGE_URL="${REGISTRY}/${{ env.IMAGE_NAME }}:${IMAGE_TAG}"
+          echo "Constructed image URL: $IMAGE_URL"
+        fi
+        
+        echo "Deploying image: $IMAGE_URL"
+        echo "Image tag: $IMAGE_TAG"
         echo "Namespace: ${{ env.NAMESPACE }}"
         echo "Deployment: ${{ env.DEPLOYMENT }}"
+        
+        # Image URL'in boş olmadığından emin ol
+        if [ -z "$IMAGE_URL" ]; then
+          echo "ERROR: Image URL is empty!"
+          echo "IMAGE_TAG: $IMAGE_TAG"
+          echo "REGISTRY: ${{ secrets.REGISTRY }}"
+          echo "IMAGE_NAME: ${{ env.IMAGE_NAME }}"
+          exit 1
+        fi
         
         # Cluster bağlantısını kontrol et
         kubectl cluster-info || {
@@ -214,15 +238,10 @@ jobs:
         kubectl get deployment/${{ env.DEPLOYMENT }} -n ${{ env.NAMESPACE }} -o jsonpath='{.spec.template.spec.containers[0].image}'
         echo ""
         
-        # Yeni image'ı göster
-        NEW_IMAGE="${{ needs.build-and-push.outputs.image_url }}"
-        echo "New image to deploy: $NEW_IMAGE"
-        echo ""
-        
         # Image tag'ini güncelle (rolling update)
-        echo "Updating deployment image..."
+        echo "Updating deployment image to: $IMAGE_URL"
         kubectl set image deployment/${{ env.DEPLOYMENT }} \
-          linkding=$NEW_IMAGE \
+          linkding=$IMAGE_URL \
           -n ${{ env.NAMESPACE }}
         
         # Güncellenmiş image'ı kontrol et
