@@ -54,11 +54,13 @@ jobs:
       if: github.event_name != 'workflow_dispatch'
       run: |
         export DOCKER_CONFIG=/tmp/.docker
-        mkdir -p "$DOCKER_CONFIG"
-        echo '{"credsStore": ""}' > "$DOCKER_CONFIG/config.json"
+        export HOME=/tmp/docker-home
+        mkdir -p "$DOCKER_CONFIG" "$HOME"
+        echo '{}' > "$DOCKER_CONFIG/config.json"
         echo "${{ secrets.DOCKER_PASSWORD }}" | docker login ${{ secrets.REGISTRY || 'docker.io' }} -u "${{ secrets.DOCKER_USERNAME }}" --password-stdin
       env:
         DOCKER_CONFIG: /tmp/.docker
+        HOME: /tmp/docker-home
 
     - name: Determine image tag
       id: image_tag
@@ -86,6 +88,7 @@ jobs:
       env:
         # macOS keychain credential helper'ı devre dışı bırak (login step'iyle aynı)
         DOCKER_CONFIG: /tmp/.docker
+        HOME: /tmp/docker-home
 
     # Step 2: Set up kubectl for Kubernetes deployment
     # Only proceed if KUBECONFIG secret is available
