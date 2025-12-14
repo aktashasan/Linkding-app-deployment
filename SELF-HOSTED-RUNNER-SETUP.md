@@ -109,11 +109,33 @@ cd ~/actions-runner
 
 Runner kurulduktan sonra workflow'u güncelleyin:
 
+### Basit Kullanım (Tek Runner):
+
 ```yaml
 jobs:
   build-and-deploy:
     runs-on: self-hosted  # ubuntu-latest yerine
 ```
+
+### Runner Label Kullanımı (Birden Fazla Runner Varsa):
+
+Eğer birden fazla self-hosted runner'ınız varsa, belirli bir runner'ı hedeflemek için label kullanabilirsiniz:
+
+1. **Runner'a label ekleyin:**
+   ```bash
+   cd ~/actions-runner
+   ./config.sh remove --token YOUR_TOKEN
+   ./config.sh --url https://github.com/YOUR-USERNAME/YOUR-REPO --token NEW_TOKEN --labels macos,linkding
+   ```
+
+2. **Workflow'da label kullanın:**
+   ```yaml
+   jobs:
+     build-and-deploy:
+       runs-on: [self-hosted, macos, linkding]
+   ```
+
+**Not:** Tek runner varsa sadece `runs-on: self-hosted` yeterlidir, runner adı yazmanıza gerek yok!
 
 ## Kontrol
 
