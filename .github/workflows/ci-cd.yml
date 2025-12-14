@@ -78,6 +78,7 @@ jobs:
         tags: ${{ secrets.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ steps.image_tag.outputs.tag }}
         cache-from: type=registry,ref=${{ secrets.REGISTRY }}/${{ env.IMAGE_NAME }}:buildcache
         cache-to: type=registry,ref=${{ secrets.REGISTRY }}/${{ env.IMAGE_NAME }}:buildcache,mode=max
+        # Note: buildcache image is used for Docker layer caching, this is normal and expected
 
     # Step 2: Set up kubectl for Kubernetes deployment
     # Only proceed if KUBECONFIG secret is available
@@ -132,15 +133,63 @@ jobs:
           exit 1
         fi
         
+        # Mevcut image'ı göster
+        echo "Current deployment image:"
+        kubectl get deployment/${{ env.DEPLOYMENT }} -n ${{ env.NAMESPACE }} -o jsonpath='{.spec.template.spec.containers[0].image}'
+        echo ""
+        
+        # Yeni image'ı göster
+        NEW_IMAGE="${{ secrets.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ steps.image_tag.outputs.tag }}"
+        echo "New image to deploy: $NEW_IMAGE"
+        echo ""
+        
         # Image tag'ini güncelle (rolling update)
         echo "Updating deployment image..."
         kubectl set image deployment/${{ env.DEPLOYMENT }} \
-          linkding=${{ secrets.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ steps.image_tag.outputs.tag }} \
+          linkding=$NEW_IMAGE \
           -n ${{ env.NAMESPACE }}
         
-        # Rolling update durumunu bekle
-        echo "Waiting for rollout to complete..."
-        kubectl rollout status deployment/${{ env.DEPLOYMENT }} -n ${{ env.NAMESPACE }} --timeout=300s
+        # Güncellenmiş image'ı kontrol et
+        echo "Updated deployment image:"
+        kubectl get deployment/${{ env.DEPLOYMENT }} -n ${{ env.NAMESPACE }} -o jsonpath='{.spec.template.spec.containers[0].image}'
+        echo ""
+        
+        # Pod durumunu kontrol et
+        echo "Current pod status:"
+        kubectl get pods -n ${{ env.NAMESPACE }} -l app=linkding
+        echo ""
+        
+        # Rolling update durumunu bekle (timeout'u 10 dakikaya çıkardık)
+        echo "Waiting for rollout to complete (timeout: 10 minutes)..."
+        if kubectl rollout status deployment/${{ env.DEPLOYMENT }} -n ${{ env.NAMESPACE }} --timeout=600s; then
+          echo "✅ Rollout completed successfully!"
+        else
+          echo "❌ WARNING: Rollout timeout or failed. Gathering diagnostic information..."
+          echo ""
+          echo "Pod status:"
+          kubectl get pods -n ${{ env.NAMESPACE }} -l app=linkding -o wide
+          echo ""
+          echo "Recent events:"
+          kubectl get events -n ${{ env.NAMESPACE }} --sort-by='.lastTimestamp' | tail -15
+          echo ""
+          echo "Deployment status:"
+          kubectl get deployment/${{ env.DEPLOYMENT }} -n ${{ env.NAMESPACE }}
+          echo ""
+          echo "Pod describe (first failing pod):"
+          FAILING_POD=$(kubectl get pods -n ${{ env.NAMESPACE }} -l app=linkding -o jsonpath='{.items[?(@.status.phase!="Running")].metadata.name}' | cut -d' ' -f1)
+          if [ -n "$FAILING_POD" ]; then
+            kubectl describe pod/$FAILING_POD -n ${{ env.NAMESPACE }}
+          else
+            kubectl describe pod -n ${{ env.NAMESPACE }} -l app=linkding | head -80
+          fi
+          echo ""
+          echo "Pod logs (first pod):"
+          FIRST_POD=$(kubectl get pods -n ${{ env.NAMESPACE }} -l app=linkding -o jsonpath='{.items[0].metadata.name}')
+          if [ -n "$FIRST_POD" ]; then
+            kubectl logs $FIRST_POD -n ${{ env.NAMESPACE }} --tail=50 || echo "Could not get logs"
+          fi
+          exit 1
+        fi
 
     - name: Verify deployment
       if: steps.kubeconfig_check.outputs.kubeconfig_available == 'true'
