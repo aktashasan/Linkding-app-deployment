@@ -124,31 +124,79 @@ kubectl wait --namespace ingress-nginx \
 echo " Labeling node for ingress..."
 kubectl label node kind-cluster-control-plane ingress-ready=true --overwrite || echo "Node already labeled"
 
-# cloud-provider-kind kontrolü ve çalıştırma (opsiyonel)
+# cloud-provider-kind kurulumu ve çalıştırma (LoadBalancer desteği için)
+echo " Setting up cloud-provider-kind for LoadBalancer support..."
+
+# cloud-provider-kind kurulu mu kontrol et
+if ! command -v cloud-provider-kind &> /dev/null; then
+    echo " cloud-provider-kind not found. Installing..."
+    
+    # Go kurulu mu kontrol et
+    if ! command -v go &> /dev/null; then
+        echo " Error: Go is required to install cloud-provider-kind"
+        echo " Please install Go first:"
+        echo "   macOS: brew install go"
+        echo "   Linux: https://go.dev/doc/install"
+        echo " Or use Homebrew (macOS): brew install cloud-provider-kind"
+        exit 1
+    fi
+    
+    # Go install ile cloud-provider-kind'ı kur
+    echo " Installing cloud-provider-kind using go install..."
+    go install sigs.k8s.io/cloud-provider-kind@latest
+    
+    # Binary'yi /usr/local/bin'e kopyala (sudo gerekir)
+    if [ -f ~/go/bin/cloud-provider-kind ]; then
+        echo " Installing cloud-provider-kind to /usr/local/bin (requires sudo)..."
+        sudo install ~/go/bin/cloud-provider-kind /usr/local/bin
+        if [ $? -eq 0 ]; then
+            echo " cloud-provider-kind installed successfully"
+        else
+            echo " Warning: Failed to install to /usr/local/bin"
+            echo " You can run it from: ~/go/bin/cloud-provider-kind"
+        fi
+    else
+        echo " Error: cloud-provider-kind binary not found after installation"
+        echo " Please install manually:"
+        echo "   go install sigs.k8s.io/cloud-provider-kind@latest"
+        echo "   sudo install ~/go/bin/cloud-provider-kind /usr/local/bin"
+        exit 1
+    fi
+fi
+
+# cloud-provider-kind'ı başlat (sudo gerekir)
 if command -v cloud-provider-kind &> /dev/null; then
     echo " Starting cloud-provider-kind (for LoadBalancer support)..."
     echo " Note: This requires sudo privileges"
-    sudo cloud-provider-kind &>/dev/null &
-    CLOUD_PROVIDER_PID=$!
-    if [ $? -eq 0 ]; then
-        echo " cloud-provider-kind started in background (PID: $CLOUD_PROVIDER_PID)"
-        sleep 2
+    
+    # Önce çalışan bir instance var mı kontrol et
+    if pgrep -f "cloud-provider-kind" > /dev/null; then
+        echo " cloud-provider-kind is already running"
     else
-        echo " Warning: Could not start cloud-provider-kind. You may need to run it manually:"
-        echo "   sudo cloud-provider-kind"
+        # Arka planda başlat
+        sudo cloud-provider-kind &>/dev/null &
+        CLOUD_PROVIDER_PID=$!
+        sleep 2
+        
+        # Başarılı başladı mı kontrol et
+        if pgrep -f "cloud-provider-kind" > /dev/null; then
+            echo " cloud-provider-kind started successfully (PID: $CLOUD_PROVIDER_PID)"
+        else
+            echo " Warning: Could not start cloud-provider-kind"
+            echo " You may need to run it manually:"
+            echo "   sudo cloud-provider-kind"
+        fi
     fi
 else
-    echo " cloud-provider-kind not found. To install:"
-    echo "   macOS: brew install cloud-provider-kind"
-    echo "   Linux: go install sigs.k8s.io/cloud-provider-kind@latest"
-    echo "         sudo install ~/go/bin/cloud-provider-kind /usr/local/bin"
-    echo " Then run: sudo cloud-provider-kind"
+    echo " Error: cloud-provider-kind is not available"
+    exit 1
 fi
 
 # Ingress controller service'ini yapılandır
-# Kind'ta LoadBalancer çalışmaz, ama port mapping (80:80, 443:443) zaten tanımlı
-# Service tipi önemli değil, port mapping otomatik çalışır
+# cloud-provider-kind ile LoadBalancer desteği aktif
+# Port mapping (80:80, 443:443) kind-config.yaml'da tanımlı
 echo " Ingress Controller configured (port mapping: 80:80, 443:443)"
+echo " LoadBalancer support enabled via cloud-provider-kind"
 
 # Ingress Controller'ın kurulu olduğunu doğrula
 echo " Final verification: Ingress Controller installation..."

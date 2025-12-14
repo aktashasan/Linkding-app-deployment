@@ -36,7 +36,7 @@ Lokal bilgisayarınızda GitHub Actions runner çalıştırın. Bu şekilde runn
    ```yaml
    jobs:
      build-and-deploy:
-       runs-on: self-hosted  # GitHub-hosted yerine
+       runs-on: self-hosted  
    ```
 
 4. **KUBECONFIG secret'ı ekleyin:**
@@ -44,17 +44,6 @@ Lokal bilgisayarınızda GitHub Actions runner çalıştırın. Bu şekilde runn
    kind export kubeconfig --name kind-cluster | base64
    # Çıktıyı GitHub Secrets → KUBECONFIG olarak ekleyin
    ```
-
-**Avantajları:**
-- ✅ Lokal cluster'a direkt erişim
-- ✅ Hızlı deploy
-- ✅ Ücretsiz
-
-**Dezavantajları:**
-- ⚠️ Bilgisayarınız açık olmalı
-- ⚠️ Runner sürekli çalışmalı
-
----
 
 ### Seçenek 2: Cloud Kubernetes Cluster (Production için)
 

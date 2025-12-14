@@ -1,54 +1,116 @@
 # Kubernetes Deployment - Linkding Application
 
-Bu proje, Kubernetes ortamı kurulumu, uygulama deployment'ı ve otomasyon adımlarını içermektedir.
+Bu proje, Kubernetes ortamı kurulumu, uygulama deployment'ı, otomasyon ve CI/CD pipeline'ını içeren kapsamlı bir Kubernetes deployment örneğidir.
 
 ## 📋 İçindekiler
 
-- [Genel Bakış](#genel-bakış)
-- [Gereksinimler](#gereksinimler)
-- [Kurulum](#kurulum)
-- [Kullanım](#kullanım)
-- [Rolling Update ve Rollback](#rolling-update-ve-rollback)
-- [Kullanılan Araçlar](#kullanılan-araçlar)
-- [Bilinen Sorunlar](#bilinen-sorunlar)
-- [Screenshot ve Video Gereksinimleri](#screenshot-ve-video-gereksinimleri)
+- [Genel Bakış](#-genel-bakış)
+- [Proje Yapısı](#-proje-yapısı)
+- [Gereksinimler](#-gereksinimler)
+- [Kurulum](#-kurulum)
+- [Kullanım](#-kullanım)
+- [CI/CD Pipeline](#-cicd-pipeline)
+- [Rolling Update ve Rollback](#-rolling-update-ve-rollback)
+- [Kullanılan Araçlar](#-kullanılan-araçlar)
+- [Bilinen Sorunlar ve Çözümler](#-bilinen-sorunlar-ve-çözümler)
+- [Temizleme](#-temizleme)
+- [Ek Kaynaklar](#-ek-kaynaklar)
 
 ## 🎯 Genel Bakış
 
 Bu proje aşağıdaki bileşenleri içermektedir:
 
-- **Kubernetes Ortamı**: Kind (Kubernetes in Docker) kullanılarak kurulmuş mini Kubernetes cluster
-- **Uygulama**: Linkding - Modern, açık kaynak bookmark manager
-- **Kubernetes Objeleri**:
-  - Deployment (Linkding + PostgreSQL)
-  - Service (ClusterIP)
-  - ConfigMap
-  - Secret
-  - Ingress
-  - PVC (PersistentVolumeClaim)
-- **Otomasyon**: setup.sh scripti ile otomatik kurulum
-- **Rolling Update & Rollback**: Image tag değiştirerek güncelleme ve geri alma
+### Kubernetes Ortamı
+- **Kind (Kubernetes in Docker)**: Lokal Kubernetes cluster
+- **NGINX Ingress Controller**: HTTP/HTTPS trafik yönetimi
+- **Local Path Provisioner**: Dinamik PVC sağlama
+
+### Uygulama Stack
+- **Linkding**: Modern, açık kaynak bookmark manager uygulaması
+- **PostgreSQL**: Linkding'in veritabanı backend'i
+
+### Kubernetes Objeleri
+- ✅ **Deployment**: Linkding ve PostgreSQL için
+- ✅ **Service (ClusterIP)**: İç servis keşfi
+- ✅ **ConfigMap**: Uygulama konfigürasyonları
+- ✅ **Secret**: Hassas bilgiler (şifreler)
+- ✅ **Ingress**: Dış erişim için
+- ✅ **PVC (PersistentVolumeClaim)**: PostgreSQL veri kalıcılığı
+- ✅ **Namespace**: Kaynak izolasyonu
+
+### Otomasyon
+- ✅ **setup.sh**: Otomatik kurulum scripti
+- ✅ **Rolling Update**: Image tag değiştirerek güncelleme
+- ✅ **Rollback**: Önceki versiyona geri dönme
+- ✅ **CI/CD Pipeline**: GitHub Actions ile otomatik build ve deploy
+
+## 📁 Proje Yapısı
+
+```
+case-study/
+├── README.md                    # Bu dosya
+├── QUICKSTART.md                # Hızlı başlangıç rehberi
+├── TROUBLESHOOTING.md           # Sorun giderme rehberi
+├── ROADMAP.md                   # Proje planı
+│
+├── setup.sh                     # Ana kurulum scripti
+├── manifests.yaml               # Tüm Kubernetes manifestleri (birleştirilmiş)
+│
+├── cluster/
+│   ├── kind-config.yaml         # Kind cluster yapılandırması
+│   └── create-cluster.sh        # Cluster oluşturma scripti
+│
+├── scripts/
+│   ├── rolling-update.sh        # Rolling update scripti
+│   ├── rollback.sh              # Rollback scripti
+│   ├── cleanup.sh               # Temizleme scripti
+│   └── port-forward.sh          # Port-forward scripti
+│
+├── linkding-source/             # Linkding kaynak kodu (git submodule)
+│   └── docker/
+│       └── default.Dockerfile   # Dockerfile
+│
+└── .github/
+    └── workflows/
+        └── ci-cd.yml            # GitHub Actions CI/CD pipeline
+```
 
 ## 📦 Gereksinimler
 
+### Zorunlu Araçlar
+
 Aşağıdaki araçların sisteminizde kurulu olması gerekmektedir:
 
-- **Docker Desktop** veya **Docker Engine** (20.10+)
-- **kubectl** (v1.28+)
-- **kind** (v0.20+)
-- **curl** veya **wget**
+| Araç | Minimum Versiyon | Açıklama |
+|------|------------------|----------|
+| **Docker** | 20.10+ | Container runtime |
+| **kubectl** | v1.28+ | Kubernetes CLI |
+| **kind** | v0.20+ | Kubernetes in Docker |
+| **git** | 2.0+ | Version control |
+
+### Opsiyonel Araçlar
+
+- **cloud-provider-kind**: LoadBalancer desteği için (opsiyonel)
+- **jq**: JSON parsing için (opsiyonel)
 
 ### Kurulum Komutları
 
 #### macOS
+
 ```bash
 # Homebrew ile
 brew install kind kubectl docker
 
-# Docker Desktop'u manuel olarak indirin: https://www.docker.com/products/docker-desktop
+# Docker Desktop'u manuel olarak indirin:
+# https://www.docker.com/products/docker-desktop
+
+# Opsiyonel: go (cloud-provider-kind otomatik kurulacak)
+# macOS: brew install go
+# Linux: https://go.dev/doc/install
 ```
 
 #### Linux
+
 ```bash
 # kubectl
 curl -LO "https://dl.k8s.io/release/$(curl -L -s https://dl.k8s.io/release/stable.txt)/bin/linux/amd64/kubectl"
@@ -61,67 +123,121 @@ sudo mv ./kind /usr/local/bin/kind
 
 # Docker
 # Docker kurulumu için: https://docs.docker.com/engine/install/
+
+# Go (cloud-provider-kind otomatik kurulacak)
+# Go kurulumu için: https://go.dev/doc/install
 ```
+
+### Sistem Gereksinimleri
+
+- **RAM**: Minimum 4GB (önerilen: 8GB+)
+- **Disk**: Minimum 10GB boş alan
+- **CPU**: 2+ core (önerilen)
 
 ## 🚀 Kurulum
 
-### 1. Repository'yi Klonlayın
+### Hızlı Başlangıç
+
+```bash
+# 1. Repository'yi klonlayın
+git clone https://github.com/aktashasan/Linkding-app-deployment.git
+cd case-study
+
+# 2. Git submodule'ları güncelleyin
+git submodule update --init --recursive
+
+# 3. Cluster'ı oluşturun
+./cluster/create-cluster.sh
+
+# 4. Uygulamayı deploy edin
+./setup.sh
+
+# 5. Erişim için /etc/hosts'a ekleyin
+echo "127.0.0.1 linkding.local" | sudo tee -a /etc/hosts
+
+# 6. Tarayıcıda açın
+# http://linkding.local
+```
+
+### Detaylı Kurulum Adımları
+
+#### 1. Repository'yi Klonlayın
 
 ```bash
 git clone <repository-url>
 cd case-study
 ```
 
-### 2. Cluster'ı Oluşturun
+#### 2. Git Submodule'ları Güncelleyin
+
+Linkding kaynak kodu git submodule olarak eklenmiştir:
+
+```bash
+git submodule update --init --recursive
+```
+
+#### 3. Cluster'ı Oluşturun
 
 ```bash
 ./cluster/create-cluster.sh
 ```
 
 Bu script:
-- Kind cluster'ı oluşturur
-- NGINX Ingress Controller'ı kurar
-- Cluster'ın hazır olduğunu doğrular
+- ✅ Kind cluster'ı oluşturur (`kind-cluster`)
+- ✅ Local Path Provisioner kurar (PVC desteği için)
+- ✅ NGINX Ingress Controller kurar
+- ✅ cloud-provider-kind kurar ve başlatır (LoadBalancer desteği için)
+- ✅ Node'u ingress-ready olarak label'lar
+- ✅ Cluster'ın hazır olduğunu doğrular
 
-### 3. Uygulamayı Deploy Edin
+**Beklenen süre:** 2-5 dakika
+
+#### 4. Uygulamayı Deploy Edin
 
 ```bash
 ./setup.sh
 ```
 
 Bu script:
-- Cluster erişimini doğrular (`kubectl get nodes`)
-- Tüm manifestleri apply eder
-- Pod'ların hazır olmasını bekler
-- Ingress erişimini test eder
+- ✅ Cluster erişimini doğrular (`kubectl get nodes`)
+- ✅ StorageClass'ı kontrol eder/oluşturur
+- ✅ Tüm Kubernetes manifestlerini apply eder
+- ✅ PostgreSQL'in hazır olmasını bekler
+- ✅ Linkding'in hazır olmasını bekler
+- ✅ Veritabanını oluşturur (gerekirse)
+- ✅ Django migration'larını çalıştırır
+- ✅ Superuser oluşturur/reset eder (admin/admin)
 
-### 4. Uygulamaya Erişin
+**Beklenen süre:** 3-5 dakika
 
-Kind cluster'ında LoadBalancer çalışmaz, ancak Ingress controller port mapping ile çalışır. 
+#### 5. Uygulamaya Erişin
 
-**Kind Config'de port mapping tanımlı:**
-- Host port 80 → Container port 80
-- Host port 443 → Container port 443
-
-**Erişim için:**
+**Ingress ile Erişim (Önerilen):**
 
 1. `/etc/hosts` dosyasını yapılandırın:
-```bash
-# macOS/Linux
-echo "127.0.0.1 linkding.local" | sudo tee -a /etc/hosts
-
-# Windows (PowerShell as Administrator)
-Add-Content C:\Windows\System32\drivers\etc\hosts "127.0.0.1 linkding.local"
-```
+   ```bash
+   # macOS/Linux
+   echo "127.0.0.1 linkding.local" | sudo tee -a /etc/hosts
+   
+   # Windows (PowerShell as Administrator)
+   Add-Content C:\Windows\System32\drivers\etc\hosts "127.0.0.1 linkding.local"
+   ```
 
 2. Tarayıcıda açın:
-- **http://linkding.local**
+   - **http://linkding.local**
 
-**Not:** Kind'ta LoadBalancer service tipi çalışmaz (cloud provider yok), ancak `kind-config.yaml`'da tanımlı port mapping sayesinde direkt erişim mümkündür.
+**Not:** `cloud-provider-kind` sayesinde Kind cluster'ında LoadBalancer service tipi desteklenmektedir. Cluster kurulumu sırasında otomatik olarak kurulur ve başlatılır.
+
+**Port-Forward ile Erişim (Alternatif):**
+
+```bash
+./scripts/port-forward.sh
+# Sonra: http://localhost:9090
+```
 
 **Varsayılan Kullanıcı Bilgileri:**
-- Username: `admin`
-- Password: `admin` (ilk girişte değiştirmeniz önerilir)
+- **Username:** `admin`
+- **Password:** `admin` (ilk girişte değiştirmeniz önerilir)
 
 ## 📝 Kullanım
 
@@ -134,11 +250,14 @@ kubectl get nodes
 # Tüm pod'ları listele
 kubectl get pods -A
 
-# Namespace'deki kaynakları listele
+# Namespace'deki tüm kaynakları listele
 kubectl get all -n linkding
 
 # Service ve Ingress'i listele
 kubectl get svc,ingress -n linkding
+
+# Deployment durumunu kontrol et
+kubectl get deployment -n linkding
 ```
 
 ### Logları Görüntüleme
@@ -149,6 +268,12 @@ kubectl logs -f deployment/linkding -n linkding
 
 # PostgreSQL pod logları
 kubectl logs -f deployment/postgres -n linkding
+
+# Belirli bir pod'un logları
+kubectl logs <pod-name> -n linkding
+
+# Önceki container'ın logları (restart olmuşsa)
+kubectl logs <pod-name> -n linkding --previous
 ```
 
 ### ConfigMap ve Secret'ları Görüntüleme
@@ -158,7 +283,21 @@ kubectl logs -f deployment/postgres -n linkding
 kubectl get configmap linkding-config -n linkding -o yaml
 
 # Secret (base64 decode edilmiş)
-kubectl get secret linkding-secret -n linkding -o jsonpath='{.data}' | jq -r 'to_entries[] | "\(.key): \(.value | @base64d)"'
+kubectl get secret linkding-secret -n linkding -o jsonpath='{.data}' | \
+  jq -r 'to_entries[] | "\(.key): \(.value | @base64d)"'
+```
+
+### Pod'lara Erişim
+
+```bash
+# Linkding pod'una shell aç
+kubectl exec -it deployment/linkding -n linkding -c linkding -- /bin/bash
+
+# PostgreSQL pod'una shell aç
+kubectl exec -it deployment/postgres -n linkding -- /bin/bash
+
+# Komut çalıştır
+kubectl exec deployment/linkding -n linkding -c linkding -- python manage.py shell
 ```
 
 ## 🔄 Rolling Update ve Rollback
@@ -172,9 +311,19 @@ Yeni bir image versiyonuna geçmek için:
 ```
 
 Bu script:
-- Deployment'ın image tag'ini günceller
-- Rolling update'i başlatır
-- Update durumunu izler
+- ✅ Mevcut image'ı gösterir
+- ✅ Deployment'ın image tag'ini günceller
+- ✅ Rolling update'i başlatır (pod'lar sırayla güncellenir)
+- ✅ Update durumunu izler (5 dakika timeout)
+- ✅ Başarılı olursa yeni image'ı gösterir
+- ✅ Rollout history'yi gösterir
+
+**Örnek:**
+```bash
+# Mevcut: sissbruecker/linkding:1.22.0
+# Yeni: sissbruecker/linkding:1.23.0
+./scripts/rolling-update.sh 1.23.0
+```
 
 ### Rollback
 
@@ -185,14 +334,19 @@ Bu script:
 ```
 
 Bu script:
-- Son rollout'u geri alır
-- Rollback durumunu izler
+- ✅ Rollout geçmişini gösterir
+- ✅ Son rollout'u geri alır
+- ✅ Rollback durumunu izler (5 dakika timeout)
+- ✅ Başarılı olursa rollback edilen image'ı gösterir
+- ✅ Güncellenmiş rollout history'yi gösterir
 
 ### Manuel Rollout Komutları
 
 ```bash
 # Rolling update başlat
-kubectl set image deployment/linkding linkding=sissbruecker/linkding:v1.23.0 -n linkding
+kubectl set image deployment/linkding \
+  linkding=sissbruecker/linkding:v1.23.0 \
+  -n linkding
 
 # Rollout durumunu izle
 kubectl rollout status deployment/linkding -n linkding
@@ -200,29 +354,208 @@ kubectl rollout status deployment/linkding -n linkding
 # Rollback yap
 kubectl rollout undo deployment/linkding -n linkding
 
+# Belirli bir revision'a rollback yap
+kubectl rollout undo deployment/linkding -n linkding --to-revision=2
+
 # Rollout geçmişini görüntüle
 kubectl rollout history deployment/linkding -n linkding
+
+# Belirli bir revision'ın detaylarını görüntüle
+kubectl rollout history deployment/linkding -n linkding --revision=2
 ```
+
+## 🔧 CI/CD Pipeline
+
+Bu proje GitHub Actions ile CI/CD pipeline içermektedir.
+
+### Özellikler
+
+- ✅ **Docker Image Build**: Linkding kaynak kodundan image build
+- ✅ **Multi-Platform Support**: linux/amd64 ve linux/arm64
+- ✅ **Docker Hub Push**: Build edilen image'ı registry'ye push
+- ✅ **Kubernetes Deploy**: Otomatik rolling update
+- ✅ **Self-Hosted Runner**: Lokal cluster'a deploy için
+
+### Kurulum
+
+Detaylı kurulum için: [CI-CD-SETUP.md](CI-CD-SETUP.md)
+
+**Gerekli GitHub Secrets:**
+- `DOCKER_USERNAME`: Docker Hub kullanıcı adı
+- `DOCKER_PASSWORD`: Docker Hub access token
+- `REGISTRY`: Registry adresi (örn: `docker.io`)
+- `APPLICATION_NAME`: Uygulama adı (örn: `linkding`)
+- `NAMESPACE`: Kubernetes namespace (örn: `linkding`)
+- `DEPLOYMENT`: Deployment adı (örn: `linkding`)
+- `KUBECONFIG`: Kubernetes cluster config (base64 encoded) - Opsiyonel
+
+### Self-Hosted Runner Kurulumu
+
+Lokal cluster'a deploy için self-hosted runner gerekir:
+
+Detaylı kurulum için: [SELF-HOSTED-RUNNER-SETUP.md](SELF-HOSTED-RUNNER-SETUP.md)
+
+### Workflow Kullanımı
+
+**Otomatik Trigger:**
+- `main` branch'ine push
+- `linkding-source/` klasöründe değişiklik
+- `manifests/` klasöründe değişiklik
+
+**Manuel Trigger:**
+1. GitHub → Actions → CI/CD Pipeline
+2. Run workflow
+3. Image tag girin (örn: `v1.23.0`)
+
+### Workflow Adımları
+
+1. **Checkout code**: Repository ve submodule'ları checkout eder
+2. **Check linkding-source**: Linkding kaynak kodunu kontrol eder/clone eder
+3. **Docker Build**: Multi-platform image build eder
+4. **Docker Push**: Docker Hub'a push eder
+5. **Kubernetes Deploy**: Rolling update ile deploy eder (KUBECONFIG varsa)
+6. **Verify**: Deployment durumunu kontrol eder
 
 ## 🛠️ Kullanılan Araçlar
 
-- **Kind**: Kubernetes cluster'ı Docker container'ları içinde çalıştırmak için
-- **NGINX Ingress Controller**: Ingress trafiğini yönetmek için
-- **Linkding**: Deploy edilen açık kaynak bookmark manager uygulaması
-- **PostgreSQL**: Linkding'in veritabanı backend'i
-- **kubectl**: Kubernetes cluster'ı yönetmek için
+| Araç | Versiyon | Amaç |
+|------|----------|------|
+| **Kind** | v0.20+ | Kubernetes cluster'ı Docker container'ları içinde çalıştırmak |
+| **NGINX Ingress Controller** | Latest | Ingress trafiğini yönetmek |
+| **Local Path Provisioner** | v0.0.24 | Dinamik PVC sağlama |
+| **Linkding** | 1.22.0+ | Deploy edilen açık kaynak bookmark manager |
+| **PostgreSQL** | 15-alpine | Linkding'in veritabanı backend'i |
+| **kubectl** | v1.28+ | Kubernetes cluster'ı yönetmek |
+| **Docker** | 20.10+ | Container runtime |
 
-## ⚠️ Bilinen Sorunlar
+## ⚠️ Bilinen Sorunlar ve Çözümler
 
-1. **Port-Forward Gereksinimi**: Kind cluster'ında LoadBalancer çalışmadığı için uygulamaya erişmek için port-forward kullanılması gerekmektedir. `./scripts/port-forward.sh` scripti ile kolayca erişilebilir.
+### 1. PVC Bind Edilemedi
 
-2. **PVC Storage Class**: Kind cluster'ında Local Path Provisioner otomatik olarak kurulur ve `local-path` storage class'ı kullanılır. `manifests/pvc.yaml` dosyasında `storageClassName: local-path` tanımlıdır.
+**Sorun:** `pod has unbound immediate PersistentVolumeClaims`
 
-3. **Superuser Oluşturma**: İlk kurulumda superuser otomatik olarak oluşturulur. Eğer oluşturulmazsa, manuel olarak `kubectl exec` komutu ile oluşturulabilir.
+**Çözüm:** Local Path Provisioner otomatik kurulur. Eğer sorun devam ederse:
+```bash
+kubectl get storageclass
+kubectl patch storageclass local-path -p '{"metadata": {"annotations":{"storageclass.kubernetes.io/is-default-class":"true"}}}'
+```
 
-4. **Resource Limits**: Geliştirme ortamı için resource limit'ler minimum seviyede tutulmuştur. Production ortamında artırılmalıdır.
+### 2. PostgreSQL Veritabanı Bulunamadı
 
-5. **Migration'lar**: İlk kurulumda Django migration'ları otomatik çalıştırılmaz. Eğer gerekirse manuel olarak çalıştırılabilir.
+**Sorun:** `FATAL: database "linkding" does not exist`
+
+**Çözüm:** `setup.sh` scripti otomatik olarak veritabanını oluşturur. Manuel oluşturmak için:
+```bash
+kubectl exec -n linkding deployment/postgres -- psql -U linkding -d postgres -c "CREATE DATABASE linkding;"
+```
+
+### 3. Django Migration'ları Çalışmadı
+
+**Sorun:** `relation "bookmarks_bookmark" does not exist`
+
+**Çözüm:** `setup.sh` scripti otomatik olarak migration'ları çalıştırır. Manuel çalıştırmak için:
+```bash
+kubectl exec -n linkding deployment/linkding -c linkding -- python manage.py migrate
+```
+
+### 4. Ingress Erişim Sorunu
+
+**Sorun:** Ingress çalışmıyor veya erişilemiyor
+
+**Çözüm:**
+```bash
+# Ingress controller'ın çalıştığını kontrol et
+kubectl get pods -n ingress-nginx
+
+# Ingress'i kontrol et
+kubectl get ingress -n linkding
+kubectl describe ingress linkding-ingress -n linkding
+
+# Alternatif: Port-forward kullan
+./scripts/port-forward.sh
+```
+
+### 5. Linkding Login Sorunu
+
+**Sorun:** Username/password ile giriş yapılamıyor
+
+**Çözüm:** `setup.sh` scripti otomatik olarak superuser oluşturur/reset eder. Manuel reset için:
+```bash
+kubectl exec -n linkding deployment/linkding -c linkding -- python manage.py shell -c "
+from django.contrib.auth import get_user_model
+User = get_user_model()
+user = User.objects.get(username='admin')
+user.set_password('admin')
+user.save()
+"
+```
+
+### 6. Platform Uyumsuzluğu (CI/CD)
+
+**Sorun:** `no match for platform in manifest: not found`
+
+**Çözüm:** Workflow multi-platform build yapar (amd64 + arm64). Yeni build yapıldığında sorun çözülür.
+
+### 7. GitHub Actions Lokal Cluster Deploy
+
+**Sorun:** GitHub Actions'tan lokal cluster'a erişilemiyor
+
+**Çözüm:** Self-hosted runner kurulmalı. Detaylar: [SELF-HOSTED-RUNNER-SETUP.md](SELF-HOSTED-RUNNER-SETUP.md)
+
+**Detaylı sorun giderme:** [TROUBLESHOOTING.md](TROUBLESHOOTING.md)
+
+## 🧹 Temizleme
+
+### Uygulamayı Temizleme
+
+```bash
+./scripts/cleanup.sh
+```
+
+Bu script:
+- ✅ `linkding` namespace'ini siler (tüm kaynaklar dahil)
+- ✅ PVC'leri siler (veri kaybı olur!)
+
+### Cluster'ı Temizleme
+
+```bash
+# Kind cluster'ı sil
+kind delete cluster --name kind-cluster
+
+# Veya tüm cluster'ları sil
+kind delete clusters --all
+```
+
+### Tam Temizlik
+
+```bash
+# 1. Uygulamayı temizle
+./scripts/cleanup.sh
+
+# 2. Cluster'ı sil
+kind delete cluster --name kind-cluster
+
+# 3. Docker image'ları temizle (opsiyonel)
+docker system prune -a
+```
+
+## 📚 Ek Kaynaklar
+
+### Dokümantasyon
+
+- [QUICKSTART.md](QUICKSTART.md) - Hızlı başlangıç rehberi
+- [TROUBLESHOOTING.md](TROUBLESHOOTING.md) - Detaylı sorun giderme
+- [CI-CD-SETUP.md](CI-CD-SETUP.md) - CI/CD kurulum rehberi
+- [SELF-HOSTED-RUNNER-SETUP.md](SELF-HOSTED-RUNNER-SETUP.md) - Runner kurulumu
+- [DEPLOYMENT-OPTIONS.md](DEPLOYMENT-OPTIONS.md) - Deploy seçenekleri
+
+### Dış Kaynaklar
+
+- [Kind Documentation](https://kind.sigs.k8s.io/)
+- [Linkding GitHub](https://github.com/sissbruecker/linkding)
+- [Kubernetes Documentation](https://kubernetes.io/docs/)
+- [NGINX Ingress Controller](https://kubernetes.github.io/ingress-nginx/)
+- [Docker Documentation](https://docs.docker.com/)
 
 ## 📸 Screenshot ve Video Gereksinimleri
 
@@ -234,58 +567,25 @@ Proje dokümantasyonu için aşağıdaki screenshot'lar veya video kayıtları �
 4. ✅ Tarayıcıda `http://linkding.local` erişimi
 5. ✅ Rolling update süreci (`kubectl rollout status`)
 6. ✅ Rollback süreci (`kubectl rollout undo`)
+7. ✅ CI/CD pipeline çalışması (GitHub Actions)
+8. ✅ Docker Hub'da image görünümü
 
 ### Screenshot Alma
 
 ```bash
 # Terminal çıktılarını kaydet
+mkdir -p screenshots
 kubectl get nodes > screenshots/nodes.txt
 kubectl get pods -A > screenshots/pods.txt
 kubectl get svc,ingress -n linkding > screenshots/services.txt
 kubectl rollout status deployment/linkding -n linkding > screenshots/rolling-update.txt
+kubectl rollout history deployment/linkding -n linkding > screenshots/rollout-history.txt
 ```
-
-## 🔗 Ingress ile Erişim
-
-Kind cluster'ında Ingress controller port mapping ile çalışır. Erişim için:
-
-1. `/etc/hosts` dosyasına ekleyin:
-```bash
-# macOS/Linux
-echo "127.0.0.1 linkding.local" | sudo tee -a /etc/hosts
-
-# Windows (PowerShell as Administrator)
-Add-Content C:\Windows\System32\drivers\etc\hosts "127.0.0.1 linkding.local"
-```
-
-2. Tarayıcıda açın: **http://linkding.local**
-
-**Alternatif: Port-Forward (Ingress kullanmak istemezseniz)**
-
-```bash
-./scripts/port-forward.sh
-# Sonra: http://localhost:9090
-```
-
-## 🧹 Temizleme
-
-Cluster'ı ve tüm kaynakları temizlemek için:
-
-```bash
-./scripts/cleanup.sh
-```
-
-Bu script:
-- Tüm Kubernetes kaynaklarını siler
-- Kind cluster'ı siler
-
-## 📚 Ek Kaynaklar
-
-- [Kind Documentation](https://kind.sigs.k8s.io/)
-- [Linkding GitHub](https://github.com/sissbruecker/linkding)
-- [Kubernetes Documentation](https://kubernetes.io/docs/)
-- [NGINX Ingress Controller](https://kubernetes.github.io/ingress-nginx/)
 
 ## 📄 Lisans
 
 Bu proje Kubernetes öğrenme ve pratik yapma amaçlı hazırlanmıştır.
+
+## 🤝 Katkıda Bulunma
+
+Sorun bildirimi veya öneriler için GitHub Issues kullanabilirsiniz.
