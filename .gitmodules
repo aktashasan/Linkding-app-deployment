@@ -1,0 +1,3 @@
+[submodule "linkding-source"]
+	path = linkding-source
+	url = https://github.com/sissbruecker/linkding.git
