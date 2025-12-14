@@ -454,6 +454,8 @@ kubectl port-forward service/linkding 8080:80 -n linkding
 | 10 | PostgreSQL not ready | ✅ Çözüldü | StorageClass ve PVC kontrolleri eklendi |
 | 11 | GitHub Actions lokal cluster deploy | ✅ Çözüldü | Self-hosted runner kuruldu |
 | 12 | Kind cluster creation log timeout | ✅ Çözüldü | --wait 10m ve --retain parametreleri eklendi |
+| 13 | Port 80/443 kullanımda | ✅ Çözüldü | Port kontrolü ve otomatik fallback eklendi |
+| 14 | cloud-provider-kind temizlenmiyor | ✅ Çözüldü | cleanup.sh ve create-cluster.sh'e otomatik temizlik eklendi |
 
 ---
 
@@ -517,6 +519,124 @@ nodes:
 ```
 
 **Not:** `create-cluster.sh` scripti artık bu sorunu otomatik olarak handle ediyor.
+
+---
+
+### 13. Port 80/443 Kullanımda - "ports are not available: address already in use"
+
+**Sorun:**
+```
+ERROR: failed to create cluster: ports are not available: exposing port TCP 0.0.0.0:80 -> 127.0.0.1:0: listen tcp4 0.0.0.0:80: bind: address already in use
+```
+
+**Neden:**
+- Port 80 veya 443 başka bir servis tarafından kullanılıyor
+- macOS'ta genellikle AirPlay Receiver port 80'i kullanır
+- `cloud-provider-kind` process'i port 80'i kullanıyor olabilir
+- Apache, Nginx veya başka bir web sunucusu çalışıyor olabilir
+
+**Çözüm:**
+
+1. **Port 80/443'ü kullanan process'leri bulun:**
+   ```bash
+   sudo lsof -i :80 -P
+   sudo lsof -i :443 -P
+   ```
+
+2. **cloud-provider-kind process'ini durdurun:**
+   ```bash
+   # Tüm cloud-provider-kind process'lerini durdur
+   sudo pkill -9 cloud-provider-kind
+   
+   # Veya belirli bir PID ile
+   sudo kill -9 <PID>
+   ```
+
+3. **Port 80/443'ü kullanan diğer process'leri durdurun:**
+   ```bash
+   # Port 80'i kullanan process'leri durdur
+   sudo kill -9 $(sudo lsof -t -i:80)
+   
+   # Port 443'ü kullanan process'leri durdur (sadece LISTEN durumundakiler)
+   sudo kill -9 $(sudo lsof -t -i:443 -sTCP:LISTEN)
+   ```
+
+4. **macOS AirPlay Receiver'ı kapatın:**
+   - System Settings > General > AirDrop & Handoff
+   - AirPlay Receiver'ı kapatın
+
+5. **Otomatik çözüm scriptleri:**
+   ```bash
+   # Port durumunu kontrol et
+   ./scripts/free-ports.sh
+   
+   # Portları serbest bırak (interaktif)
+   ./scripts/kill-ports.sh
+   ```
+
+6. **create-cluster.sh otomatik fallback:**
+   - Script port kontrolü yapıyor
+   - Port kullanılıyorsa geçici config (port mapping olmadan) oluşturuyor
+   - Port hatası alınırsa otomatik olarak port mapping olmadan tekrar deniyor
+
+**Alternatif Erişim Yöntemleri:**
+
+Port mapping olmadan cluster oluşturulursa:
+
+1. **LoadBalancer IP (cloud-provider-kind):**
+   ```bash
+   kubectl get svc -n ingress-nginx
+   # EXTERNAL-IP'i kullanın
+   ```
+
+2. **Port-forward:**
+   ```bash
+   kubectl port-forward -n ingress-nginx service/ingress-nginx-controller 8080:80
+   # Sonra: http://localhost:8080
+   ```
+
+**Not:** `cleanup.sh` scripti artık cluster silindiğinde `cloud-provider-kind` process'ini de otomatik olarak durduruyor.
+
+---
+
+### 14. cloud-provider-kind Process'i Temizlenmiyor
+
+**Sorun:**
+- Cluster silindiğinde `cloud-provider-kind` process'i çalışmaya devam ediyor
+- Port 80/443 kullanımda kalıyor
+
+**Neden:**
+- `cloud-provider-kind` arka planda çalışıyor ve otomatik durmuyor
+- Cluster silindiğinde process temizlenmiyor
+
+**Çözüm:**
+
+1. **Manuel olarak durdurun:**
+   ```bash
+   # Tüm cloud-provider-kind process'lerini bul
+   pgrep -f cloud-provider-kind
+   
+   # Durdur
+   sudo pkill -9 cloud-provider-kind
+   ```
+
+2. **cleanup.sh scripti kullanın:**
+   ```bash
+   ./scripts/cleanup.sh
+   # Script otomatik olarak cloud-provider-kind'ı durdurur
+   ```
+
+3. **create-cluster.sh otomatik temizlik:**
+   - Mevcut cluster silinmeden önce `cloud-provider-kind` durdurulur
+   - Cluster silinirken process'ler temizlenir
+
+**Önleme:**
+
+Cluster silmeden önce her zaman `cleanup.sh` scriptini çalıştırın:
+```bash
+./scripts/cleanup.sh
+kind delete cluster --name kind-cluster
+```
 
 ---
 

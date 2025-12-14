@@ -18,12 +18,35 @@ if ! docker info &> /dev/null; then
     exit 1
 fi
 
+# Script dizinini bul
+SCRIPT_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
+KIND_CONFIG_FILE="${SCRIPT_DIR}/kind-config.yaml"
+TEMP_CONFIG=""
+
 # Port 80 ve 443'ün kullanılabilir olduğunu kontrol et
 check_port() {
     local port=$1
-    if lsof -Pi :$port -sTCP:LISTEN -t >/dev/null 2>&1 || \
-       netstat -an 2>/dev/null | grep -q ":$port.*LISTEN" || \
-       (command -v ss >/dev/null && ss -lnt 2>/dev/null | grep -q ":$port"); then
+    # macOS için lsof kontrolü
+    if command -v lsof >/dev/null 2>&1; then
+        # Normal kullanıcı ile dene
+        if lsof -Pi :$port -sTCP:LISTEN -t >/dev/null 2>&1; then
+            return 1  # Port kullanımda
+        fi
+    fi
+    # Linux için netstat kontrolü
+    if command -v netstat >/dev/null 2>&1; then
+        if netstat -an 2>/dev/null | grep -q ":$port.*LISTEN"; then
+            return 1  # Port kullanımda
+        fi
+    fi
+    # Linux için ss kontrolü
+    if command -v ss >/dev/null 2>&1; then
+        if ss -lnt 2>/dev/null | grep -q ":$port"; then
+            return 1  # Port kullanımda
+        fi
+    fi
+    # Docker container'ları kontrol et (port mapping)
+    if docker ps --format "{{.Ports}}" 2>/dev/null | grep -q ":$port->"; then
         return 1  # Port kullanımda
     fi
     return 0  # Port boş
@@ -32,6 +55,8 @@ check_port() {
 PORT_80_AVAILABLE=true
 PORT_443_AVAILABLE=true
 
+# Port kontrolü yap
+echo " Checking port availability..."
 if ! check_port 80; then
     PORT_80_AVAILABLE=false
     echo " Warning: Port 80 is already in use"
@@ -54,14 +79,17 @@ nodes:
         node-labels: "ingress-ready=true"
 EOF
     
-    # Port 443 kullanılabilirse ekle
-    if check_port 443; then
+    # Port 443 kullanılabilirse ekle (sadece boşsa)
+    if check_port 443 && [ "$PORT_443_AVAILABLE" = "true" ]; then
         cat >> "$TEMP_CONFIG" <<EOF
   extraPortMappings:
   - containerPort: 443
     hostPort: 443
     protocol: TCP
 EOF
+        echo " Port 443 is available, added to config"
+    else
+        echo " Port 443 is also in use, skipping port mapping"
     fi
     
     echo " Note: Ingress will be accessible via LoadBalancer IP (cloud-provider-kind)"
@@ -72,57 +100,98 @@ if ! check_port 443; then
     PORT_443_AVAILABLE=false
     echo " Warning: Port 443 is already in use"
     echo " HTTPS Ingress may not work on port 443"
-fi
-
-if ! check_port 443; then
-    echo " Warning: Port 443 is already in use"
-    echo " HTTPS Ingress may not work on port 443"
     echo " Continuing anyway..."
 fi
 
 # Mevcut cluster varsa sil
 if kind get clusters | grep -q "kind-cluster"; then
     echo " Existing cluster found. Deleting..."
+    
+    # cloud-provider-kind'ı durdur (cluster silinmeden önce)
+    if pgrep -f "cloud-provider-kind" > /dev/null; then
+        echo " Stopping cloud-provider-kind..."
+        CLOUD_PROVIDER_PIDS=$(pgrep -f "cloud-provider-kind")
+        for pid in $CLOUD_PROVIDER_PIDS; do
+            if sudo kill -9 $pid 2>/dev/null; then
+                echo " Stopped cloud-provider-kind (PID: $pid)"
+            else
+                echo " Warning: Could not stop cloud-provider-kind (PID: $pid) - may require sudo"
+            fi
+        done
+    fi
+    
     kind delete cluster --name kind-cluster
 fi
-
-# Cluster oluştur
-echo " Creating Kind cluster..."
-SCRIPT_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
-KIND_CONFIG_FILE="${SCRIPT_DIR}/kind-config.yaml"
-TEMP_CONFIG=""
 
 # Docker'ın hazır olduğundan emin ol
 echo " Waiting for Docker to be ready..."
 sleep 2
 
+# Cluster oluştur
+echo " Creating Kind cluster..."
+
 # Kind cluster oluştur
 # --wait parametresi ile timeout artırıldı ve --retain ile hata durumunda cluster silinmez
 echo " Creating cluster (this may take a few minutes)..."
-if ! kind create cluster --config "${KIND_CONFIG_FILE}" --wait 10m --retain; then
-    echo " Warning: Cluster creation encountered an issue"
-    echo " Checking if cluster was partially created..."
-    
-    # Cluster'ın oluşup oluşmadığını kontrol et
-    if kind get clusters | grep -q "kind-cluster"; then
-        echo " Cluster exists, attempting to use it..."
-        # Context'i kontrol et
-        kubectl cluster-info --context kind-kind-cluster 2>/dev/null || kubectl cluster-info --context kind-cluster 2>/dev/null
-        if [ $? -eq 0 ]; then
-            echo " Cluster is accessible, continuing..."
+if ! kind create cluster --config "${KIND_CONFIG_FILE}" --wait 10m --retain 2>&1 | tee /tmp/kind-create.log; then
+    # Port hatası kontrolü
+    if grep -q "ports are not available\|address already in use" /tmp/kind-create.log; then
+        echo ""
+        echo " Port conflict detected! Creating cluster without port mapping..."
+        
+        # Port mapping olmadan geçici config oluştur
+        if [ "$KIND_CONFIG_FILE" = "${SCRIPT_DIR}/kind-config.yaml" ]; then
+            TEMP_CONFIG="${SCRIPT_DIR}/kind-config-temp.yaml"
+            cat > "$TEMP_CONFIG" <<EOF
+kind: Cluster
+apiVersion: kind.x-k8s.io/v1alpha4
+name: kind-cluster
+nodes:
+- role: control-plane
+  kubeadmConfigPatches:
+  - |
+    kind: InitConfiguration
+    nodeRegistration:
+      kubeletExtraArgs:
+        node-labels: "ingress-ready=true"
+EOF
+            KIND_CONFIG_FILE="$TEMP_CONFIG"
+            echo " Retrying without port mapping..."
+            if ! kind create cluster --config "${KIND_CONFIG_FILE}" --wait 10m --retain; then
+                echo " Error: Cluster creation failed even without port mapping"
+                rm -f "$TEMP_CONFIG"
+                exit 1
+            fi
         else
-            echo " Error: Cluster exists but is not accessible"
-            echo " Try deleting and recreating: kind delete cluster --name kind-cluster"
+            echo " Error: Port conflict and already using temp config"
             exit 1
         fi
     else
-        echo " Error: Cluster creation failed completely"
-        echo " Troubleshooting steps:"
-        echo " 1. Check Docker is running: docker ps"
-        echo " 2. Try deleting any existing clusters: kind delete clusters --all"
-        echo " 3. Check Docker resources: docker system df"
-        exit 1
+        echo " Warning: Cluster creation encountered an issue"
+        echo " Checking if cluster was partially created..."
+        
+        # Cluster'ın oluşup oluşmadığını kontrol et
+        if kind get clusters | grep -q "kind-cluster"; then
+            echo " Cluster exists, attempting to use it..."
+            # Context'i kontrol et
+            kubectl cluster-info --context kind-kind-cluster 2>/dev/null || kubectl cluster-info --context kind-cluster 2>/dev/null
+            if [ $? -eq 0 ]; then
+                echo " Cluster is accessible, continuing..."
+            else
+                echo " Error: Cluster exists but is not accessible"
+                echo " Try deleting and recreating: kind delete cluster --name kind-cluster"
+                exit 1
+            fi
+        else
+            echo " Error: Cluster creation failed completely"
+            echo " Troubleshooting steps:"
+            echo " 1. Check Docker is running: docker ps"
+            echo " 2. Try deleting any existing clusters: kind delete clusters --all"
+            echo " 3. Check Docker resources: docker system df"
+            exit 1
+        fi
     fi
+    rm -f /tmp/kind-create.log
 fi
 
 # kubectl context'ini ayarla

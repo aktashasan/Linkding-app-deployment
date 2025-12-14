@@ -23,8 +23,10 @@ Eksik araçlar için: [README.md - Gereksinimler bölümüne bakın](README.md#g
 
 ```bash
 cd cluster
-./create-cluster.sh
+sudo ./create-cluster.sh
 ```
+
+**Not:** Script `cloud-provider-kind` kurulumu için sudo gerektirir.
 
 Bu işlem 2-3 dakika sürebilir.
 

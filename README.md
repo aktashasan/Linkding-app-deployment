@@ -149,8 +149,10 @@ git submodule update --init --recursive
 #### 3. Cluster'ı Oluşturun
 
 ```bash
-./cluster/create-cluster.sh
+sudo ./cluster/create-cluster.sh
 ```
+
+**Not:** Script `cloud-provider-kind` kurulumu ve başlatılması için sudo gerektirir.
 
 Bu script:
 - ✅ Kind cluster'ı oluşturur (`kind-cluster`)
@@ -417,7 +419,7 @@ kubectl exec -n linkding deployment/linkding -c linkding -- python manage.py mig
 
 **Sorun:** Ingress çalışmıyor veya erişilemiyor
 
-**Not:** Kind cluster'ında varsayılan olarak LoadBalancer service tipi desteklenmez, ancak `cloud-provider-kind` ile bu özellik sağlanmaktadır. Cluster kurulumu sırasında (`./cluster/create-cluster.sh`) `cloud-provider-kind` otomatik olarak kurulur ve başlatılır, böylece LoadBalancer desteği aktif hale gelir.
+**Not:** Kind cluster'ında varsayılan olarak LoadBalancer service tipi desteklenmez, ancak `cloud-provider-kind` ile bu özellik sağlanmaktadır. Cluster kurulumu sırasında (`sudo ./cluster/create-cluster.sh`) `cloud-provider-kind` otomatik olarak kurulur ve başlatılır (sudo gerektirir), böylece LoadBalancer desteği aktif hale gelir.
 
 **Çözüm:**
 ```bash
