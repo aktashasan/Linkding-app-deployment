@@ -1,0 +1,29 @@
+# Kubernetes
+*.kubeconfig
+kubeconfig
+
+# Secrets (base64 encoded olarak tutulacak ama .env dosyaları ignore edilmeli)
+.env
+*.env.local
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+
+# Linkding source (git submodule olarak kullanılacaksa)
+# linkding-source/
+
+# Temporary files
+tmp/
+temp/
+*.tmp

@@ -1,0 +1,105 @@
+name: CI/CD Pipeline
+
+on:
+  push:
+    branches:
+      - main
+      - master
+    paths:
+      - 'manifests/**'
+      - 'linkding-source/**'
+      - '.github/workflows/ci-cd.yml'
+  workflow_dispatch:
+    inputs:
+      image_tag:
+        description: 'Docker image tag to deploy'
+        required: true
+        default: 'latest'
+
+env:
+  REGISTRY: docker.io
+  IMAGE_NAME: ${{ secrets.DOCKER_USERNAME }}/linkding
+  NAMESPACE: linkding
+  DEPLOYMENT: linkding
+
+jobs:
+  build-and-deploy:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Set up Docker Buildx
+      uses: docker/setup-buildx-action@v3
+
+    - name: Log in to Docker Hub
+      if: github.event_name != 'workflow_dispatch'
+      uses: docker/login-action@v3
+      with:
+        username: ${{ secrets.DOCKER_USERNAME }}
+        password: ${{ secrets.DOCKER_PASSWORD }}
+
+    - name: Determine image tag
+      id: image_tag
+      run: |
+        if [ "${{ github.event_name }}" == "workflow_dispatch" ]; then
+          echo "tag=${{ github.event.inputs.image_tag }}" >> $GITHUB_OUTPUT
+        else
+          echo "tag=${{ github.sha }}" >> $GITHUB_OUTPUT
+        fi
+
+    - name: Build and push Docker image
+      uses: docker/build-push-action@v5
+      with:
+        context: ./linkding-source
+        file: ./linkding-source/docker/default.Dockerfile
+        push: true
+        tags: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ steps.image_tag.outputs.tag }}
+        cache-from: type=registry,ref=${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:buildcache
+        cache-to: type=registry,ref=${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:buildcache,mode=max
+
+    - name: Set up kubectl
+      uses: azure/setup-kubectl@v3
+      with:
+        version: 'latest'
+
+    - name: Configure kubectl
+      run: |
+        # Kubernetes cluster kubeconfig'ini secret'tan al
+        if [ -n "${{ secrets.KUBECONFIG }}" ]; then
+          mkdir -p ~/.kube
+          echo "${{ secrets.KUBECONFIG }}" | base64 -d > ~/.kube/config
+          chmod 600 ~/.kube/config
+        else
+          echo "ERROR: KUBECONFIG secret not set. Please configure kubectl manually."
+          echo "For Kind cluster, you can use:"
+          echo "  kind export kubeconfig --name kind-cluster"
+          echo "  Then add it as a GitHub secret: KUBECONFIG"
+        fi
+
+    - name: Deploy to Kubernetes
+      run: |
+        # Image tag'ini güncelle
+        kubectl set image deployment/${{ env.DEPLOYMENT }} \
+          linkding=${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ steps.image_tag.outputs.tag }} \
+          -n ${{ env.NAMESPACE }}
+
+        # Rolling update durumunu bekle
+        kubectl rollout status deployment/${{ env.DEPLOYMENT }} -n ${{ env.NAMESPACE }} --timeout=300s
+
+    - name: Verify deployment
+      run: |
+        echo "Deployment status:"
+        kubectl get deployment/${{ env.DEPLOYMENT }} -n ${{ env.NAMESPACE }}
+        echo ""
+        echo "Pod status:"
+        kubectl get pods -n ${{ env.NAMESPACE }} -l app=linkding
+        echo ""
+        echo "Deployed image: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ steps.image_tag.outputs.tag }}"
+        echo ""
+        echo "Rollout history:"
+        kubectl rollout history deployment/${{ env.DEPLOYMENT }} -n ${{ env.NAMESPACE }}

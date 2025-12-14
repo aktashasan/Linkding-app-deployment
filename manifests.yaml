@@ -1,0 +1,322 @@
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: linkding
+  labels:
+    name: linkding
+    app: linkding
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: linkding-config
+  namespace: linkding
+data:
+  LD_DB_ENGINE: "postgres"
+  LD_DB_NAME: "linkding"
+  LD_DB_USER: "linkding"
+  LD_DB_HOST: "postgres"
+  LD_DB_PORT: "5432"
+
+  LD_SUPERUSER_NAME: "admin"
+  LD_SUPERUSER_EMAIL: "admin@example.com"
+  LD_DISABLE_BACKGROUND_TASKS: "false"
+  LD_ENABLE_BOOKMARK_ARCHIVING: "true"
+  LD_ENABLE_BOOKMARK_LINK_CHECKING: "true"
+  
+  LD_SERVER_PORT: "9090"
+  LD_SERVER_HOST: "0.0.0.0"
+  
+  LD_CSRF_TRUSTED_ORIGINS: "http://linkding.local,http://localhost"
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: linkding-secret
+  namespace: linkding
+type: Opaque
+data:
+  LD_DB_PASSWORD: bGlua2RpbmdwYXNzd29yZA==
+  postgres-password: cG9zdGdyZXMxMjM=
+  postgres-user-password: bGlua2RpbmdwYXNzd29yZA==
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: postgres-pvc
+  namespace: linkding
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 5Gi
+  storageClassName: local-path
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: postgres
+  namespace: linkding
+  labels:
+    app: postgres
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: postgres
+  template:
+    metadata:
+      labels:
+        app: postgres
+    spec:
+      containers:
+      - name: postgres
+        image: postgres:15-alpine
+        ports:
+        - containerPort: 5432
+          name: postgres
+        env:
+        - name: POSTGRES_DB
+          valueFrom:
+            configMapKeyRef:
+              name: linkding-config
+              key: LD_DB_NAME
+        - name: POSTGRES_USER
+          valueFrom:
+            configMapKeyRef:
+              name: linkding-config
+              key: LD_DB_USER
+        - name: POSTGRES_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: linkding-secret
+              key: postgres-user-password
+        - name: PGDATA
+          value: /var/lib/postgresql/data/pgdata
+        volumeMounts:
+        - name: postgres-storage
+          mountPath: /var/lib/postgresql/data
+        resources:
+          requests:
+            memory: "256Mi"
+            cpu: "250m"
+          limits:
+            memory: "512Mi"
+            cpu: "500m"
+        livenessProbe:
+          exec:
+            command:
+            - /bin/sh
+            - -c
+            - pg_isready -U linkding -d linkding
+          initialDelaySeconds: 30
+          periodSeconds: 10
+        readinessProbe:
+          exec:
+            command:
+            - /bin/sh
+            - -c
+            - pg_isready -U linkding -d linkding
+          initialDelaySeconds: 5
+          periodSeconds: 5
+      volumes:
+      - name: postgres-storage
+        persistentVolumeClaim:
+          claimName: postgres-pvc
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: postgres
+  namespace: linkding
+  labels:
+    app: postgres
+spec:
+  type: ClusterIP
+  ports:
+  - port: 5432
+    targetPort: 5432
+    protocol: TCP
+    name: postgres
+  selector:
+    app: postgres
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: linkding
+  namespace: linkding
+  labels:
+    app: linkding
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: linkding
+  template:
+    metadata:
+      labels:
+        app: linkding
+    spec:
+      containers:
+      - name: linkding
+        image: sissbruecker/linkding:1.22.0
+        ports:
+        - containerPort: 9090
+          name: http
+        env:
+        - name: LD_DB_ENGINE
+          valueFrom:
+            configMapKeyRef:
+              name: linkding-config
+              key: LD_DB_ENGINE
+        - name: LD_DB_NAME
+          valueFrom:
+            configMapKeyRef:
+              name: linkding-config
+              key: LD_DB_NAME
+        - name: LD_DB_USER
+          valueFrom:
+            configMapKeyRef:
+              name: linkding-config
+              key: LD_DB_USER
+        - name: LD_DB_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: linkding-secret
+              key: LD_DB_PASSWORD
+        - name: LD_DB_HOST
+          valueFrom:
+            configMapKeyRef:
+              name: linkding-config
+              key: LD_DB_HOST
+        - name: LD_DB_PORT
+          valueFrom:
+            configMapKeyRef:
+              name: linkding-config
+              key: LD_DB_PORT
+        - name: LD_SUPERUSER_NAME
+          valueFrom:
+            configMapKeyRef:
+              name: linkding-config
+              key: LD_SUPERUSER_NAME
+        - name: LD_SUPERUSER_EMAIL
+          valueFrom:
+            configMapKeyRef:
+              name: linkding-config
+              key: LD_SUPERUSER_EMAIL
+        - name: LD_DISABLE_BACKGROUND_TASKS
+          valueFrom:
+            configMapKeyRef:
+              name: linkding-config
+              key: LD_DISABLE_BACKGROUND_TASKS
+        - name: LD_ENABLE_BOOKMARK_ARCHIVING
+          valueFrom:
+            configMapKeyRef:
+              name: linkding-config
+              key: LD_ENABLE_BOOKMARK_ARCHIVING
+        - name: LD_ENABLE_BOOKMARK_LINK_CHECKING
+          valueFrom:
+            configMapKeyRef:
+              name: linkding-config
+              key: LD_ENABLE_BOOKMARK_LINK_CHECKING
+        - name: LD_SERVER_PORT
+          valueFrom:
+            configMapKeyRef:
+              name: linkding-config
+              key: LD_SERVER_PORT
+        - name: LD_SERVER_HOST
+          valueFrom:
+            configMapKeyRef:
+              name: linkding-config
+              key: LD_SERVER_HOST
+        - name: LD_CSRF_TRUSTED_ORIGINS
+          valueFrom:
+            configMapKeyRef:
+              name: linkding-config
+              key: LD_CSRF_TRUSTED_ORIGINS
+        resources:
+          requests:
+            memory: "256Mi"
+            cpu: "250m"
+          limits:
+            memory: "512Mi"
+            cpu: "500m"
+        livenessProbe:
+          httpGet:
+            path: /
+            port: 9090
+          initialDelaySeconds: 60
+          periodSeconds: 10
+          timeoutSeconds: 5
+        readinessProbe:
+          httpGet:
+            path: /
+            port: 9090
+          initialDelaySeconds: 30
+          periodSeconds: 5
+          timeoutSeconds: 3
+      initContainers:
+      - name: wait-for-postgres
+        image: postgres:15-alpine
+        command:
+        - sh
+        - -c
+        - |
+          until pg_isready -h postgres -U linkding -d linkding; do
+            echo "Waiting for PostgreSQL..."
+            sleep 2
+          done
+          echo "PostgreSQL is ready!"
+        env:
+        - name: PGPASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: linkding-secret
+              key: LD_DB_PASSWORD
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: linkding
+  namespace: linkding
+  labels:
+    app: linkding
+spec:
+  type: ClusterIP
+  ports:
+  - port: 80
+    targetPort: 9090
+    protocol: TCP
+    name: http
+  selector:
+    app: linkding
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: linkding-ingress
+  namespace: linkding
+  annotations:
+    nginx.ingress.kubernetes.io/rewrite-target: /
+    nginx.ingress.kubernetes.io/ssl-redirect: "false"
+    nginx.ingress.kubernetes.io/affinity: "cookie"
+    nginx.ingress.kubernetes.io/session-cookie-name: "linkding-session"
+    nginx.ingress.kubernetes.io/session-cookie-expires: "172800"
+    nginx.ingress.kubernetes.io/session-cookie-max-age: "172800"
+spec:
+  ingressClassName: nginx
+  rules:
+  - host: linkding.local
+    http:
+      paths:
+      - path: /
+        pathType: Prefix
+        backend:
+          service:
+            name: linkding
+            port:
+              number: 80
+

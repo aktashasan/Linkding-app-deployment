@@ -1,0 +1,427 @@
+# Sorun Giderme Rehberi
+
+Bu dokümanda proje sırasında karşılaşılan sorunlar ve çözümleri listelenmiştir.
+
+## Sorunlar ve Çözümler
+
+### 1. PVC Bind Edilemedi - "pod has unbound immediate PersistentVolumeClaims"
+
+**Sorun:**
+```
+Warning  FailedScheduling  0/1 nodes are available: pod has unbound immediate PersistentVolumeClaims.
+```
+
+**Neden:**
+- Kind cluster'ında varsayılan storage class yok
+- PVC `storageClassName: ""` ile oluşturulmuştu ama bind edilemedi
+
+**Çözüm:**
+1. Local Path Provisioner kuruldu:
+   ```bash
+   kubectl apply -f https://raw.githubusercontent.com/rancher/local-path-provisioner/v0.0.24/deploy/local-path-storage.yaml
+   kubectl patch storageclass local-path -p '{"metadata": {"annotations":{"storageclass.kubernetes.io/is-default-class":"true"}}}'
+   ```
+
+2. PVC manifest'i güncellendi:
+   ```yaml
+   storageClassName: local-path  # Önceden: storageClassName: ""
+   ```
+
+3. Eski PVC silinip yeniden oluşturuldu:
+   ```bash
+   kubectl delete pvc postgres-pvc -n linkding
+   kubectl apply -f manifests/pvc.yaml
+   ```
+
+**Dosyalar:**
+- `cluster/create-cluster.sh` - Local Path Provisioner kurulumu eklendi
+- `manifests/pvc.yaml` - storageClassName güncellendi
+
+---
+
+### 2. PostgreSQL Veritabanı Bulunamadı - "FATAL: database 'linkding' does not exist"
+
+**Sorun:**
+```
+django.db.utils.OperationalError: FATAL:  database "linkding" does not exist
+```
+
+**Neden:**
+- PostgreSQL container'ı başladı ama `POSTGRES_DB` environment variable'ı ile veritabanı otomatik oluşturulmadı
+- PVC'de önceden veri varsa, PostgreSQL init script'i çalışmıyor
+
+**Çözüm:**
+Manuel olarak veritabanı oluşturuldu:
+```bash
+kubectl exec -n linkding deployment/postgres -- psql -U linkding -d postgres -c "CREATE DATABASE linkding;"
+```
+
+**Not:** Bu sorun sadece ilk kurulumda oluştu. PVC temizlenirse PostgreSQL otomatik oluşturur.
+
+---
+
+### 3. Django Migration'ları Çalıştırılmadı - "relation 'bookmarks_bookmark' does not exist"
+
+**Sorun:**
+```
+django.db.utils.ProgrammingError: relation "bookmarks_bookmark" does not exist
+```
+
+**Neden:**
+- Linkding uygulaması başladı ama Django migration'ları çalıştırılmadı
+- Veritabanı tabloları oluşturulmadı
+
+**Çözüm:**
+Manuel olarak migration'lar çalıştırıldı:
+```bash
+kubectl exec -n linkding deployment/linkding -c linkding -- python manage.py migrate
+```
+
+**Gelecek İyileştirme:**
+Linkding deployment'ına init container eklenebilir:
+```yaml
+initContainers:
+- name: migrate
+  image: sissbruecker/linkding:1.22.0
+  command: ["python", "manage.py", "migrate"]
+  env:
+    # ... tüm environment variables
+```
+
+---
+
+### 4. Port 8080 Kullanımda - "Unable to listen on port 8080: address already in use"
+
+**Sorun:**
+```
+Unable to listen on port 8080: Listeners failed to create with the following errors: 
+[unable to create listener: Error listen tcp4 127.0.0.1:8080: bind: address already in use]
+```
+
+**Neden:**
+- Önceki bir `kubectl port-forward` işlemi hala çalışıyor
+- Port 8080 başka bir uygulama tarafından kullanılıyor
+
+**Çözüm:**
+1. Çalışan port-forward işlemini bul ve sonlandır:
+   ```bash
+   lsof -ti:8080 | xargs kill -9
+   # veya
+   ps aux | grep port-forward
+   kill <PID>
+   ```
+
+2. Alternatif port kullan:
+   ```bash
+   kubectl port-forward -n linkding service/linkding 9090:80
+   ```
+
+**Dosyalar:**
+- `scripts/port-forward.sh` - Varsayılan port 9090 olarak değiştirildi
+
+---
+
+### 5. Ingress-Nginx Kurulum Sorunu - "ingress-nginx namespace empty"
+
+**Sorun:**
+```
+kubectl get pods -n ingress-nginx
+No resources found in ingress-nginx namespace.
+```
+
+**Neden:**
+- Ingress Controller manifest'i apply edildi ama pod'lar oluşmadı
+- Network bağlantı sorunları
+- Deployment oluşmadan önce bekleme süresi yetersiz
+
+**Çözüm:**
+1. `create-cluster.sh` script'ine retry mekanizması eklendi:
+   - Deployment'ın oluşması için 30 kez kontrol (60 saniye)
+   - Pod'ların hazır olması için 3 dakika bekleme
+   - Emergency installation fallback mekanizması
+
+2. Manuel kurulum:
+   ```bash
+   kubectl apply -f https://raw.githubusercontent.com/kubernetes/ingress-nginx/main/deploy/static/provider/kind/deploy.yaml
+   kubectl wait --namespace ingress-nginx \
+     --for=condition=ready pod \
+     --selector=app.kubernetes.io/component=controller \
+     --timeout=180s
+   ```
+
+**Dosyalar:**
+- `cluster/create-cluster.sh` - Retry logic ve deployment kontrolü eklendi
+
+---
+
+### 6. Kind Context Hatası - "error: context 'kind-cluster' does not exist"
+
+**Sorun:**
+```
+error: context "kind-cluster" does not exist
+```
+
+**Neden:**
+- Kind, context'i `kind-{cluster-name}` formatında oluşturur
+- Script `kind-cluster` arıyordu ama Kind `kind-kind-cluster` oluşturmuştu
+
+**Çözüm:**
+Script güncellendi, her iki context adını da kontrol ediyor:
+```bash
+kubectl cluster-info --context kind-kind-cluster || kubectl cluster-info --context kind-cluster
+```
+
+**Dosyalar:**
+- `cluster/create-cluster.sh` - Context kontrolü dinamik hale getirildi
+
+---
+
+### 7. cloud-provider-kind Syntax Hatası
+
+**Sorun:**
+```
+line 131: syntax error near unexpected token `;`
+```
+
+**Neden:**
+- Bash syntax hatası: `if sudo cloud-provider-kind &>/dev/null &; then` geçersiz
+
+**Çözüm:**
+Syntax düzeltildi:
+```bash
+sudo cloud-provider-kind &>/dev/null &
+CLOUD_PROVIDER_PID=$!
+if [ $? -eq 0 ]; then
+    echo "cloud-provider-kind started"
+fi
+```
+
+**Dosyalar:**
+- `cluster/create-cluster.sh` - Syntax hatası düzeltildi
+
+---
+
+### 8. create-cluster.sh kind-config.yaml Path Sorunu
+
+**Sorun:**
+```
+ERROR: failed to create cluster: error reading file: open kind-config.yaml: no such file or directory
+```
+
+**Neden:**
+- Script farklı dizinden çalıştırıldığında `kind-config.yaml` dosyasını bulamıyor
+- Relative path kullanılıyordu
+
+**Çözüm:**
+Script'in bulunduğu dizin dinamik olarak bulunuyor:
+```bash
+SCRIPT_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
+kind create cluster --config "${SCRIPT_DIR}/kind-config.yaml"
+```
+
+**Dosyalar:**
+- `cluster/create-cluster.sh` - SCRIPT_DIR değişkeni eklendi
+
+---
+
+### 9. Linkding Login Sorunu - "CSRF cookie not set" / "user şifre giriyorum içeri almıyor"
+
+**Sorun:**
+```
+WARNING Forbidden (CSRF cookie not set.): /login/
+POST /login/ => HTTP/1.1 403
+```
+
+**Neden:**
+- Linkding, Ingress üzerinden erişildiğinde CSRF doğrulaması başarısız oluyor
+- `CSRF_TRUSTED_ORIGINS` ayarı eksikti
+- Session cookie'leri düzgün çalışmıyordu
+
+**Çözüm:**
+1. ConfigMap'e `LD_CSRF_TRUSTED_ORIGINS` eklendi:
+   ```yaml
+   LD_CSRF_TRUSTED_ORIGINS: "http://linkding.local,http://localhost"
+   ```
+
+2. Deployment'a environment variable eklendi:
+   ```yaml
+   - name: LD_CSRF_TRUSTED_ORIGINS
+     valueFrom:
+       configMapKeyRef:
+         name: linkding-config
+         key: LD_CSRF_TRUSTED_ORIGINS
+   ```
+
+3. Ingress'e session affinity eklendi:
+   ```yaml
+   annotations:
+     nginx.ingress.kubernetes.io/affinity: "cookie"
+     nginx.ingress.kubernetes.io/session-cookie-name: "linkding-session"
+     nginx.ingress.kubernetes.io/session-cookie-expires: "172800"
+     nginx.ingress.kubernetes.io/session-cookie-max-age: "172800"
+   ```
+
+4. Superuser şifresi otomatik reset ediliyor:
+   ```bash
+   kubectl exec -n linkding deployment/linkding -c linkding -- python manage.py shell -c "
+   from django.contrib.auth import get_user_model
+   User = get_user_model()
+   user = User.objects.get(username='admin')
+   user.set_password('admin')
+   user.save()
+   "
+   ```
+
+**Dosyalar:**
+- `manifests.yaml` - ConfigMap, Deployment ve Ingress güncellendi
+- `setup.sh` - Superuser password reset otomatikleştirildi
+
+---
+
+### 10. PostgreSQL Not Ready - Pod Başlamıyor
+
+**Sorun:**
+```
+postgres pod not ready
+```
+
+**Neden:**
+- PVC bind edilemedi
+- PostgreSQL init script çalışmadı
+- Health check başarısız
+
+**Çözüm:**
+1. PVC durumunu kontrol et:
+   ```bash
+   kubectl get pvc -n linkding
+   kubectl describe pvc postgres-pvc -n linkding
+   ```
+
+2. Pod loglarını kontrol et:
+   ```bash
+   kubectl logs -n linkding deployment/postgres
+   kubectl describe pod -n linkding -l app=postgres
+   ```
+
+3. StorageClass'ın default olduğundan emin ol:
+   ```bash
+   kubectl get storageclass
+   kubectl patch storageclass local-path -p '{"metadata": {"annotations":{"storageclass.kubernetes.io/is-default-class":"true"}}}'
+   ```
+
+---
+
+## Genel Sorun Giderme Adımları
+
+### Pod'lar Başlamıyor
+
+```bash
+kubectl get pods -n linkding
+
+kubectl describe pod <pod-name> -n linkding
+
+
+kubectl logs <pod-name> -n linkding
+
+kubectl logs <pod-name> -n linkding --previous
+```
+
+### PVC Bind Edilemiyor
+
+```bash
+kubectl get storageclass
+
+kubectl get pvc -n linkding
+
+kubectl describe pvc postgres-pvc -n linkding
+
+kubectl get pv
+```
+
+### Veritabanı Bağlantı Sorunları
+
+```bash
+kubectl exec -it deployment/postgres -n linkding -- psql -U linkding
+
+kubectl exec deployment/postgres -n linkding -- psql -U linkding -c "\l"
+
+kubectl exec deployment/postgres -n linkding -- psql -U linkding -d postgres -c "CREATE DATABASE linkding;"
+```
+
+### Linkding Migration Sorunları
+
+```bash
+kubectl exec deployment/linkding -n linkding -c linkding -- python manage.py showmigrations
+
+kubectl exec deployment/linkding -n linkding -c linkding -- python manage.py migrate
+
+kubectl exec -it deployment/linkding -n linkding -c linkding -- python manage.py createsuperuser
+```
+
+### Ingress Erişim Sorunları
+
+```bash
+kubectl get ingress -n linkding
+
+kubectl describe ingress linkding-ingress -n linkding
+
+kubectl get pods -n ingress-nginx
+
+kubectl port-forward service/linkding 8080:80 -n linkding
+# Sonra: curl http://localhost:8080
+```
+
+---
+
+## ✅ Çözülen Sorunlar Özeti
+
+| # | Sorun | Durum | Çözüm |
+|---|-------|-------|-------|
+| 1 | PVC bind edilemedi | ✅ Çözüldü | Local Path Provisioner kuruldu |
+| 2 | PostgreSQL veritabanı yok | ✅ Çözüldü | setup.sh'e otomatik DB oluşturma eklendi |
+| 3 | Django migration'ları çalışmadı | ✅ Çözüldü | setup.sh'e otomatik migration eklendi |
+| 4 | Port 8080 kullanımda | ✅ Çözüldü | port-forward.sh varsayılan port 9090 |
+| 5 | Ingress-Nginx kurulmuyor | ✅ Çözüldü | create-cluster.sh'e retry logic eklendi |
+| 6 | Kind context hatası | ✅ Çözüldü | Dinamik context kontrolü eklendi |
+| 7 | cloud-provider-kind syntax hatası | ✅ Çözüldü | Bash syntax düzeltildi |
+| 8 | kind-config.yaml path sorunu | ✅ Çözüldü | SCRIPT_DIR değişkeni eklendi |
+| 9 | Linkding login sorunu (CSRF) | ✅ Çözüldü | CSRF_TRUSTED_ORIGINS ve session affinity eklendi |
+| 10 | PostgreSQL not ready | ✅ Çözüldü | StorageClass ve PVC kontrolleri eklendi |
+
+---
+
+## 🚀 Önleyici Önlemler
+
+### 1. Otomatik Veritabanı Oluşturma
+
+PostgreSQL deployment'ına init container eklenebilir:
+```yaml
+initContainers:
+- name: init-db
+  image: postgres:15-alpine
+  command: ['sh', '-c', 'until pg_isready -h postgres; do sleep 1; done && psql -U linkding -d postgres -c "SELECT 1 FROM pg_database WHERE datname='\''linkding'\''" | grep -q 1 || psql -U linkding -d postgres -c "CREATE DATABASE linkding;"']
+```
+
+### 2. Otomatik Migration
+
+Linkding deployment'ına migration init container eklenebilir:
+```yaml
+initContainers:
+- name: migrate
+  image: sissbruecker/linkding:1.22.0
+  command: ["python", "manage.py", "migrate", "--noinput"]
+  env:
+    # Tüm Linkding environment variables
+```
+
+### 3. Health Check İyileştirmeleri
+
+PostgreSQL liveness/readiness probe'ları veritabanı varlığını kontrol edebilir:
+```yaml
+readinessProbe:
+  exec:
+    command:
+    - /bin/sh
+    - -c
+    - 'pg_isready -U linkding -d linkding'
+```

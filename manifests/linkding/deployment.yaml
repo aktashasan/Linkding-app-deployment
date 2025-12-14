@@ -1,0 +1,129 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: linkding
+  namespace: linkding
+  labels:
+    app: linkding
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: linkding
+  template:
+    metadata:
+      labels:
+        app: linkding
+    spec:
+      containers:
+      - name: linkding
+        image: sissbruecker/linkding:1.22.0
+        ports:
+        - containerPort: 9090
+          name: http
+        env:
+        - name: LD_DB_ENGINE
+          valueFrom:
+            configMapKeyRef:
+              name: linkding-config
+              key: LD_DB_ENGINE
+        - name: LD_DB_NAME
+          valueFrom:
+            configMapKeyRef:
+              name: linkding-config
+              key: LD_DB_NAME
+        - name: LD_DB_USER
+          valueFrom:
+            configMapKeyRef:
+              name: linkding-config
+              key: LD_DB_USER
+        - name: LD_DB_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: linkding-secret
+              key: LD_DB_PASSWORD
+        - name: LD_DB_HOST
+          valueFrom:
+            configMapKeyRef:
+              name: linkding-config
+              key: LD_DB_HOST
+        - name: LD_DB_PORT
+          valueFrom:
+            configMapKeyRef:
+              name: linkding-config
+              key: LD_DB_PORT
+        - name: LD_SUPERUSER_NAME
+          valueFrom:
+            configMapKeyRef:
+              name: linkding-config
+              key: LD_SUPERUSER_NAME
+        - name: LD_SUPERUSER_EMAIL
+          valueFrom:
+            configMapKeyRef:
+              name: linkding-config
+              key: LD_SUPERUSER_EMAIL
+        - name: LD_DISABLE_BACKGROUND_TASKS
+          valueFrom:
+            configMapKeyRef:
+              name: linkding-config
+              key: LD_DISABLE_BACKGROUND_TASKS
+        - name: LD_ENABLE_BOOKMARK_ARCHIVING
+          valueFrom:
+            configMapKeyRef:
+              name: linkding-config
+              key: LD_ENABLE_BOOKMARK_ARCHIVING
+        - name: LD_ENABLE_BOOKMARK_LINK_CHECKING
+          valueFrom:
+            configMapKeyRef:
+              name: linkding-config
+              key: LD_ENABLE_BOOKMARK_LINK_CHECKING
+        - name: LD_SERVER_PORT
+          valueFrom:
+            configMapKeyRef:
+              name: linkding-config
+              key: LD_SERVER_PORT
+        - name: LD_SERVER_HOST
+          valueFrom:
+            configMapKeyRef:
+              name: linkding-config
+              key: LD_SERVER_HOST
+        resources:
+          requests:
+            memory: "256Mi"
+            cpu: "250m"
+          limits:
+            memory: "512Mi"
+            cpu: "500m"
+        livenessProbe:
+          httpGet:
+            path: /
+            port: 9090
+          initialDelaySeconds: 60
+          periodSeconds: 10
+          timeoutSeconds: 5
+        readinessProbe:
+          httpGet:
+            path: /
+            port: 9090
+          initialDelaySeconds: 30
+          periodSeconds: 5
+          timeoutSeconds: 3
+      # PostgreSQL hazır olana kadar bekle
+      initContainers:
+      - name: wait-for-postgres
+        image: postgres:15-alpine
+        command:
+        - sh
+        - -c
+        - |
+          until pg_isready -h postgres -U linkding -d linkding; do
+            echo "Waiting for PostgreSQL..."
+            sleep 2
+          done
+          echo "PostgreSQL is ready!"
+        env:
+        - name: PGPASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: linkding-secret
+              key: LD_DB_PASSWORD
