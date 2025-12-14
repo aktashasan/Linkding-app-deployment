@@ -18,6 +18,68 @@ if ! docker info &> /dev/null; then
     exit 1
 fi
 
+# Port 80 ve 443'ün kullanılabilir olduğunu kontrol et
+check_port() {
+    local port=$1
+    if lsof -Pi :$port -sTCP:LISTEN -t >/dev/null 2>&1 || \
+       netstat -an 2>/dev/null | grep -q ":$port.*LISTEN" || \
+       (command -v ss >/dev/null && ss -lnt 2>/dev/null | grep -q ":$port"); then
+        return 1  # Port kullanımda
+    fi
+    return 0  # Port boş
+}
+
+PORT_80_AVAILABLE=true
+PORT_443_AVAILABLE=true
+
+if ! check_port 80; then
+    PORT_80_AVAILABLE=false
+    echo " Warning: Port 80 is already in use"
+    echo " Creating temporary kind config without port 80 mapping..."
+    
+    # Geçici config dosyası oluştur (port mapping olmadan)
+    TEMP_CONFIG="${SCRIPT_DIR}/kind-config-temp.yaml"
+    KIND_CONFIG_FILE="$TEMP_CONFIG"
+    cat > "$TEMP_CONFIG" <<EOF
+kind: Cluster
+apiVersion: kind.x-k8s.io/v1alpha4
+name: kind-cluster
+nodes:
+- role: control-plane
+  kubeadmConfigPatches:
+  - |
+    kind: InitConfiguration
+    nodeRegistration:
+      kubeletExtraArgs:
+        node-labels: "ingress-ready=true"
+EOF
+    
+    # Port 443 kullanılabilirse ekle
+    if check_port 443; then
+        cat >> "$TEMP_CONFIG" <<EOF
+  extraPortMappings:
+  - containerPort: 443
+    hostPort: 443
+    protocol: TCP
+EOF
+    fi
+    
+    echo " Note: Ingress will be accessible via LoadBalancer IP (cloud-provider-kind)"
+    echo "       or you can use port-forward: kubectl port-forward -n ingress-nginx service/ingress-nginx-controller 8080:80"
+fi
+
+if ! check_port 443; then
+    PORT_443_AVAILABLE=false
+    echo " Warning: Port 443 is already in use"
+    echo " HTTPS Ingress may not work on port 443"
+fi
+
+if ! check_port 443; then
+    echo " Warning: Port 443 is already in use"
+    echo " HTTPS Ingress may not work on port 443"
+    echo " Continuing anyway..."
+fi
+
 # Mevcut cluster varsa sil
 if kind get clusters | grep -q "kind-cluster"; then
     echo " Existing cluster found. Deleting..."
@@ -27,6 +89,8 @@ fi
 # Cluster oluştur
 echo " Creating Kind cluster..."
 SCRIPT_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
+KIND_CONFIG_FILE="${SCRIPT_DIR}/kind-config.yaml"
+TEMP_CONFIG=""
 
 # Docker'ın hazır olduğundan emin ol
 echo " Waiting for Docker to be ready..."
@@ -35,7 +99,7 @@ sleep 2
 # Kind cluster oluştur
 # --wait parametresi ile timeout artırıldı ve --retain ile hata durumunda cluster silinmez
 echo " Creating cluster (this may take a few minutes)..."
-if ! kind create cluster --config "${SCRIPT_DIR}/kind-config.yaml" --wait 10m --retain; then
+if ! kind create cluster --config "${KIND_CONFIG_FILE}" --wait 10m --retain; then
     echo " Warning: Cluster creation encountered an issue"
     echo " Checking if cluster was partially created..."
     
@@ -263,8 +327,21 @@ else
     fi
 fi
 
+# Geçici config dosyasını temizle
+if [ -n "$TEMP_CONFIG" ] && [ -f "$TEMP_CONFIG" ]; then
+    echo " Cleaning up temporary config file..."
+    rm -f "$TEMP_CONFIG"
+fi
+
 echo " Cluster created successfully!"
 echo ""
+if [ "$PORT_80_AVAILABLE" = "false" ]; then
+    echo " Note: Port 80 was in use, cluster created without port mapping"
+    echo "       Access Ingress via:"
+    echo "       1. LoadBalancer IP (cloud-provider-kind): kubectl get svc -n ingress-nginx"
+    echo "       2. Port-forward: kubectl port-forward -n ingress-nginx service/ingress-nginx-controller 8080:80"
+    echo ""
+fi
 echo " Cluster information:"
 kubectl get nodes
 echo ""
