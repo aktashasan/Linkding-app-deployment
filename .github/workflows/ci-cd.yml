@@ -53,6 +53,9 @@ jobs:
     - name: Log in to Docker Hub
       if: github.event_name != 'workflow_dispatch'
       run: |
+        export DOCKER_CONFIG=/tmp/.docker
+        mkdir -p "$DOCKER_CONFIG"
+        echo '{"credsStore": ""}' > "$DOCKER_CONFIG/config.json"
         echo "${{ secrets.DOCKER_PASSWORD }}" | docker login ${{ secrets.REGISTRY || 'docker.io' }} -u "${{ secrets.DOCKER_USERNAME }}" --password-stdin
       env:
         DOCKER_CONFIG: /tmp/.docker
