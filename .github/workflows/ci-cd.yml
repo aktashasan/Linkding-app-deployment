@@ -52,12 +52,18 @@ jobs:
 
     - name: Log in to Docker Hub
       if: github.event_name != 'workflow_dispatch'
+      timeout-minutes: 2
       run: |
         export DOCKER_CONFIG=/tmp/.docker
         export HOME=/tmp/docker-home
         mkdir -p "$DOCKER_CONFIG" "$HOME"
         echo '{}' > "$DOCKER_CONFIG/config.json"
-        echo "${{ secrets.DOCKER_PASSWORD }}" | docker login ${{ secrets.REGISTRY || 'docker.io' }} -u "${{ secrets.DOCKER_USERNAME }}" --password-stdin
+        REGISTRY_URL="${{ secrets.REGISTRY }}"
+        if [ -z "$REGISTRY_URL" ]; then
+          REGISTRY_URL="docker.io"
+        fi
+        echo "${{ secrets.DOCKER_PASSWORD }}" | docker login "$REGISTRY_URL" -u "${{ secrets.DOCKER_USERNAME }}" --password-stdin
+        echo "✅ Docker login successful to $REGISTRY_URL"
       env:
         DOCKER_CONFIG: /tmp/.docker
         HOME: /tmp/docker-home
